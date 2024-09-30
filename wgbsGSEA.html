@@ -188,8 +188,118 @@ BiocManager::install(c(&quot;enrichplot&quot;, &quot;clusterProfiler&quot;, &quo
 tools::package_dependencies(&quot;methylGSA&quot;, recursive = TRUE)
 library(methylGSA)</code></pre>
 </div>
-<div id="data-visualization-steps" class="section level2">
-<h2>2. Data Visualization Steps</h2>
+<div id="running-on-toy-data" class="section level2">
+<h2>2. Running on Toy Data</h2>
+<div id="methylgsa" class="section level4">
+<h4>methylGSA</h4>
+<p>First, for visualization / understanding of parameters, we will run the two methods on toy data given in documentation:</p>
+<pre class="r"><code>library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+vignette(&quot;methylGSA-vignette&quot;, package = &quot;methylGSA&quot;)</code></pre>
+<pre><code>## starting httpd help server ... done</code></pre>
+<pre class="r"><code>data(package = &quot;methylGSA&quot;)
+data(cpgtoy)
+head(cpg.pval, 20)</code></pre>
+<pre><code>## cg00050873 cg00212031 cg00214611 cg01707559 cg02004872 cg02011394 cg02050847 
+##     0.2876     0.7883     0.4090     0.8830     0.9405     0.0456     0.5281 
+## cg02233190 cg02494853 cg02839557 cg02842889 cg03052502 cg03244189 cg03443143 
+##     0.8924     0.5514     0.4566     0.9568     0.4533     0.6776     0.5726 
+## cg03683899 cg03706273 cg03750315 cg04016144 cg04042030 cg04448376 
+##     0.1029     0.8998     0.2461     0.0421     0.3279     0.9545</code></pre>
+<p>Now, we can run methylglm (adjusts length bias in DNA Methylation by the number of CpGs) on the toy dataset:</p>
+<pre class="r"><code># res1 = methylglm(
+#     cpg.pval = cpg.pval,
+#     minsize = 200,
+#     maxsize = 500,
+#     GS.type = &quot;KEGG&quot;,
+#     array.type = &quot;450K&quot;  # or &quot;EPIC&quot;
+# )</code></pre>
+<pre class="r"><code># head(res1, 15)</code></pre>
+<pre class="r"><code>library(org.Hs.eg.db)</code></pre>
+<pre><code>## Loading required package: AnnotationDbi</code></pre>
+<pre class="r"><code>genes_04080 = select(org.Hs.eg.db, &quot;04080&quot;, &quot;SYMBOL&quot;, keytype = &quot;PATH&quot;)</code></pre>
+<pre><code>## &#39;select()&#39; returned 1:many mapping between keys and columns</code></pre>
+<pre class="r"><code>head(genes_04080)</code></pre>
+<pre><code>##    PATH    SYMBOL
+## 1 04080 ADCYAP1R1
+## 2 04080    ADORA1
+## 3 04080   ADORA2A
+## 4 04080   ADORA2B
+## 5 04080    ADORA3
+## 6 04080    ADRA1D</code></pre>
+<pre class="r"><code># res3 = methylRRA(cpg.pval = cpg.pval, method = &quot;GSEA&quot;, 
+#                     minsize = 200, maxsize = 210)
+# head(res3, 10)</code></pre>
+<pre class="r"><code># res3 = methylRRA(cpg.pval = cpg.pval, method = &quot;GSEA&quot;, 
+#                     minsize = 200, maxsize = 210)
+# head(res3, 10)</code></pre>
+<pre class="r"><code># res4 = methylgometh(cpg.pval = cpg.pval, sig.cut = 0.001, 
+#                         minsize = 200, maxsize = 210)
+# head(res4, 15)</code></pre>
+<pre class="r"><code>data(CpG2Genetoy)
+head(CpG2Gene)  </code></pre>
+<pre><code>##          CpG   Gene
+## 1 cg00050873  TSPY4
+## 2 cg00212031 TTTY14
+## 3 cg00214611 TMSB4Y
+## 4 cg01707559  TBL1Y
+## 5 cg02004872 TMSB4Y
+## 6 cg02011394  TSPY4</code></pre>
+<pre class="r"><code># FullAnnot = prepareAnnot(CpG2Gene) </code></pre>
+<pre class="r"><code># GS.list = GS.list[1:10]
+# res5 = methylRRA(cpg.pval = cpg.pval, FullAnnot = FullAnnot, method = &quot;ORA&quot;, 
+#                     GS.list = GS.list, GS.idtype = &quot;SYMBOL&quot;, 
+#                     minsize = 100, maxsize = 300)
+# head(res5, 10)</code></pre>
+<pre class="r"><code>res6 = methylglm(cpg.pval = cpg.pval, array.type = &quot;450K&quot;, 
+                    GS.type = &quot;Reactome&quot;, minsize = 100, maxsize = 110)</code></pre>
+<pre><code>## retrieving Reactome sets...</code></pre>
+<pre><code>## 26 gene sets are being tested...</code></pre>
+<pre><code>## Done!</code></pre>
+<pre class="r"><code>head(res6, 10)</code></pre>
+<pre><code>##                          ID
+## R-HSA-5668541 R-HSA-5668541
+## R-HSA-5610787 R-HSA-5610787
+## R-HSA-1236975 R-HSA-1236975
+## R-HSA-69239     R-HSA-69239
+## R-HSA-382556   R-HSA-382556
+## R-HSA-9648025 R-HSA-9648025
+## R-HSA-9006936 R-HSA-9006936
+## R-HSA-6785807 R-HSA-6785807
+## R-HSA-1296071 R-HSA-1296071
+## R-HSA-156827   R-HSA-156827
+##                                                                                   Description
+## R-HSA-5668541                                 Homo sapiens: TNFR2 non-canonical NF-kB pathway
+## R-HSA-5610787                                              Homo sapiens: Hedgehog &#39;off&#39; state
+## R-HSA-1236975                             Homo sapiens: Antigen processing-Cross presentation
+## R-HSA-69239                                                    Homo sapiens: Synthesis of DNA
+## R-HSA-382556                             Homo sapiens: ABC-family proteins mediated transport
+## R-HSA-9648025                        Homo sapiens: EML4 and NUDC in mitotic spindle formation
+## R-HSA-9006936                                  Homo sapiens: Signaling by TGFB family members
+## R-HSA-6785807                        Homo sapiens: Interleukin-4 and Interleukin-13 signaling
+## R-HSA-1296071                                                Homo sapiens: Potassium Channels
+## R-HSA-156827  Homo sapiens: L13a-mediated translational silencing of Ceruloplasmin expression
+##               Size      pvalue       padj
+## R-HSA-5668541  100 0.005045571 0.09037195
+## R-HSA-5610787  109 0.006951688 0.09037195
+## R-HSA-1236975  101 0.041092304 0.35613330
+## R-HSA-69239    110 0.202106409 1.00000000
+## R-HSA-382556   102 0.228674257 1.00000000
+## R-HSA-9648025  106 0.538560205 1.00000000
+## R-HSA-9006936  102 0.741575236 1.00000000
+## R-HSA-6785807  107 0.957450727 1.00000000
+## R-HSA-1296071  103 1.000000000 1.00000000
+## R-HSA-156827   109 1.000000000 1.00000000</code></pre>
+</div>
+<div id="ebgsea" class="section level4">
+<h4>ebGSEA</h4>
+<pre class="r"><code>#  myLoad &lt;- champ.load(directory=system.file(&quot;extdata&quot;,package=&quot;ChAMPdata&quot;))
+#         myNorm &lt;- champ.norm()
+#         myGSEA.ebGSEA &lt;- champ.ebGSEA(beta=myNorm,pheno=myLoad$pd$Sample_Group,arraytype=&quot;450K&quot;)
+#         
+#         
+# sgt.m &lt;-doGT(phenoSMK.v,dataSMK.m,array=&quot;450k&quot;,ncores=4)
+# champ.ebGSEA(beta=myNorm, pheno=myLoad$pd$Sample_Group, minN=5, adjPval=0.05, arraytype=&quot;450K&quot;, cores=1)</code></pre>
+</div>
 </div>
 
 

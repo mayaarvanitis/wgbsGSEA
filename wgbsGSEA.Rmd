@@ -42,8 +42,76 @@ tools::package_dependencies("methylGSA", recursive = TRUE)
 library(methylGSA)
 ```
 
-## 2. Data Visualization Steps
+## 2. Running on Toy Data
+
+#### methylGSA
+First, for visualization / understanding of parameters, we will run the two methods on toy data given in documentation:
 
 
+```{r}
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+vignette("methylGSA-vignette", package = "methylGSA")
+data(package = "methylGSA")
+data(cpgtoy)
+head(cpg.pval, 20)
+```
+Now, we can run methylglm (adjusts length bias in DNA Methylation by the number of CpGs) on the toy dataset: 
+```{r}
+res1 = methylglm(
+    cpg.pval = cpg.pval,
+    minsize = 200,
+    maxsize = 500,
+    GS.type = "KEGG",
+    array.type = "450K"  # or "EPIC"
+)
+```
 
+```{r}
+head(res1, 15)
+```
 
+```{r}
+library(org.Hs.eg.db)
+genes_04080 = select(org.Hs.eg.db, "04080", "SYMBOL", keytype = "PATH")
+head(genes_04080)
+```
+```{r}
+res3 = methylRRA(cpg.pval = cpg.pval, method = "GSEA", 
+                    minsize = 200, maxsize = 210)
+head(res3, 10)
+```
+
+```{r}
+res3 = methylRRA(cpg.pval = cpg.pval, method = "GSEA", 
+                    minsize = 200, maxsize = 210)
+head(res3, 10)
+```
+
+```{r}
+res4 = methylgometh(cpg.pval = cpg.pval, sig.cut = 0.001, 
+                        minsize = 200, maxsize = 210)
+head(res4, 15)
+```
+
+```{r}
+data(CpG2Genetoy)
+head(CpG2Gene)  
+```
+
+```{r}
+FullAnnot = prepareAnnot(CpG2Gene) 
+```
+
+```{r}
+GS.list = GS.list[1:10]
+res5 = methylRRA(cpg.pval = cpg.pval, FullAnnot = FullAnnot, method = "ORA", 
+                    GS.list = GS.list, GS.idtype = "SYMBOL", 
+                    minsize = 100, maxsize = 300)
+head(res5, 10)
+```
+
+```{r}
+res6 = methylglm(cpg.pval = cpg.pval, array.type = "450K", 
+                    GS.type = "Reactome", minsize = 100, maxsize = 110)
+head(res6, 10)
+```

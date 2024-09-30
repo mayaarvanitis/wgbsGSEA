@@ -1,0 +1,51 @@
+---
+title: "Gene Set Enrichment Analysis with ebGSEA and methylGSA"
+author: "Maya Arvanitis"
+date: "9/30/2024"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+COMP401 Master 
+==========================================
+
+# Gene Set Enrichment Analysis for WGBS Data
+In this project, we will analyze DNA methylation patterns using `methylGSA` on WGBS data to identify enriched gene sets.
+
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+
+```{r, results="hide", message=FALSE, warning=FALSE}
+#installation
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+    
+BiocManager::install("ChAMPdata")
+BiocManager::install("ChAMP")
+
+#Installing dependencies
+install.packages("remotes")
+remotes::install_github("YuLab-SMU/ggtree")
+BiocManager::install(c("enrichplot", "clusterProfiler", "methylGSA"), dependencies = TRUE)
+```
+
+```{r, results="hide", message=FALSE, warning=FALSE}
+library(ChAMP)
+tools::package_dependencies("methylGSA", recursive = TRUE)
+library(methylGSA)
+```
+
+### Data Visualization Steps
+
+
+
+

@@ -1,0 +1,49 @@
+---
+title: "Evaluating Gene Set Enrichment Analysis Methods (methylGSA & ebGSEA) for Whole Genome Bisulfite Sequencing Data"
+author: "Maya Arvanitis, McGill University"
+date: "Fall 2024"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+---
+
+## 1. Installations
+
+```{r}
+#options for Rmd. formatting
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+```{r, results="hide", message=FALSE, warning=FALSE}
+#installation
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+    
+BiocManager::install("ChAMPdata")
+BiocManager::install("ChAMP")
+
+#Installing dependencies
+install.packages("remotes")
+remotes::install_github("YuLab-SMU/ggtree")
+BiocManager::install(c("enrichplot", "clusterProfiler", "methylGSA"), dependencies = TRUE)
+```
+
+```{r, results="hide", message=FALSE, warning=FALSE}
+library(ChAMP)
+tools::package_dependencies("methylGSA", recursive = TRUE)
+library(methylGSA)
+```
+
+## 2. Data Visualization Steps
+
+
+
+

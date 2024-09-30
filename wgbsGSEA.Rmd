@@ -1,7 +1,7 @@
 ---
-title: "Gene Set Enrichment Analysis with ebGSEA and methylGSA"
-author: "Maya Arvanitis"
-date: "9/30/2024"
+title: "Evaluating Gene Set Enrichment Analysis Methods (methylGSA & ebGSEA) for Whole Genome Bisulfite Sequencing Data"
+author: "Maya Arvanitis, McGill University"
+date: "Fall 2024"
 output:
   html_document: default
   pdf_document: default
@@ -13,16 +13,14 @@ output:
   pdf_document: default
 ---
 
-COMP401 Master 
-==========================================
+---
 
-# Gene Set Enrichment Analysis for WGBS Data
-In this project, we will analyze DNA methylation patterns using `methylGSA` on WGBS data to identify enriched gene sets.
+## 1. Installations
 
 ```{r}
+#options for Rmd. formatting
 options(repos = c(CRAN = "https://cran.rstudio.com/"))
 ```
-
 
 ```{r, results="hide", message=FALSE, warning=FALSE}
 #installation
@@ -44,7 +42,7 @@ tools::package_dependencies("methylGSA", recursive = TRUE)
 library(methylGSA)
 ```
 
-### Data Visualization Steps
+## 2. Data Visualization Steps
 
 
 

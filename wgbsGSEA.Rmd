@@ -14,9 +14,7 @@ output:
 ---
 
 ---
-
 ## 1. Installations
-
 ```{r}
 #options for Rmd. formatting
 options(repos = c(CRAN = "https://cran.rstudio.com/"))
@@ -26,7 +24,7 @@ options(repos = c(CRAN = "https://cran.rstudio.com/"))
 #installation
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
-    
+
 BiocManager::install("ChAMPdata")
 BiocManager::install("ChAMP")
 
@@ -34,6 +32,7 @@ BiocManager::install("ChAMP")
 install.packages("remotes")
 remotes::install_github("YuLab-SMU/ggtree")
 BiocManager::install(c("enrichplot", "clusterProfiler", "methylGSA"), dependencies = TRUE)
+BiocManager::install("IlluminaHumanMethylationEPICanno.ilm10b4.hg19")
 ```
 
 ```{r, results="hide", message=FALSE, warning=FALSE}
@@ -45,73 +44,110 @@ library(methylGSA)
 ## 2. Running on Toy Data
 
 #### methylGSA
+----------------------------------------
 First, for visualization / understanding of parameters, we will run the two methods on toy data given in documentation:
 
-
 ```{r}
-library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
 vignette("methylGSA-vignette", package = "methylGSA")
 data(package = "methylGSA")
 data(cpgtoy)
 head(cpg.pval, 20)
 ```
-Now, we can run methylglm (adjusts length bias in DNA Methylation by the number of CpGs) on the toy dataset: 
-```{r}
-res1 = methylglm(
-    cpg.pval = cpg.pval,
-    minsize = 200,
-    maxsize = 500,
-    GS.type = "KEGG",
-    array.type = "450K"  # or "EPIC"
-)
-```
+We will run the two main functions from methylGSA:
+1. methylglm: Implements logistic regression adjusting for number of probes in enrichment analysis. 
+2. methylRRA:Enrichment analysis after adjusting multiple p-values of each gene by Robust Rank Aggregation.
+
+###### 1. methylglm
+Usage: 
+`methylglm(cpg.pval, array.type = "450K", FullAnnot = NULL,group = "all", GS.list = NULL, GS.idtype = "SYMBOL", GS.type = "GO", minsize = 100, maxsize = 500, parallel = FALSE, BPPARAM = bpparam())`
+
+###### 2. methylRRA
+Usage: 
+`methylRRA(cpg.pval, array.type = "450K", FullAnnot = NULL,group = "all", method = "ORA", sig.cut = 0.05, topDE = NULL,GS.list = NULL, GS.idtype = "SYMBOL", GS.type = "GO",minsize = 100, maxsize = 500)`
 
 ```{r}
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+```
+Running methylglm:
+```{r}
+library(clusterProfiler)
+getOption("clusterProfiler.download.method")
+install.packages("R.utils")
+library("R.utils")
+R.utils::setOption("clusterProfiler.download.method", "auto")
+```
+
+Note that original documentation uses KEGG sets, but here used GO due to network issues which is why we get low pvalues.
+```{r}
+res1 = methylglm(cpg.pval = cpg.pval, minsize = 200, 
+                 maxsize = 500, GS.type = "GO")
 head(res1, 15)
 ```
+We receive a data frame, ranked p values (lowest to highest). With the following columns:
+- ID: Gene set ID
+- Description: Gene set description
+- Size: Number of genes in gene set
+- pvalue: p-value in logistic regression
+- padg: Adjusted p-value 
 
+Running methylRRA:
+This will aggregate several ranked gene lists into a single gene lists. 
 ```{r}
-library(org.Hs.eg.db)
-genes_04080 = select(org.Hs.eg.db, "04080", "SYMBOL", keytype = "PATH")
-head(genes_04080)
+res2 = methylRRA(cpg.pval = cpg.pval, method = "ORA", 
+                   minsize = 200, maxsize = 210)
+head(res2, 15)
 ```
+
+Where we have outputted the following columns:
+- ID: Gene set ID
+- Description: Gene set description
+- Count: Number of significant genes in the gene set
+- overlap: Names of significant genes in the gene set
+- Size: number of genes in gene set
+- pvalue: p-value in ORA
+- padj: Adjusted p-value
+
+Running methylgometh: which will apply the GSEAPreranked appraoched using method = "GSEA" in methylRRA
 ```{r}
-res3 = methylRRA(cpg.pval = cpg.pval, method = "GSEA", 
-                    minsize = 200, maxsize = 210)
+res3 = methylRRA(cpg.pval = cpg.pval, method = "GSEA", minsize = 200, maxsize = 210)
+
 head(res3, 10)
 ```
 
+Where we have outputted the following columns: 
+- ID: Gene set ID
+- Description: Gene set description
+- Size: Number of genes in gene set
+- enrichmentScore: Enrichment Score (calcualted to reflect the degree which a set S is overrepresented at the extremes (top of bottom) of the entire list L. See [1] for more details on this + p-value calculation)
+- NES: Normalized enrichment score
+- pvalue: p-value in GSEA 
+- padj: Adjusted p-value
+
+Visaulizing results of methylglm:
 ```{r}
-res3 = methylRRA(cpg.pval = cpg.pval, method = "GSEA", 
-                    minsize = 200, maxsize = 210)
-head(res3, 10)
+barplot(res1, num=8, colorby= "pvalue")
 ```
 
-```{r}
-res4 = methylgometh(cpg.pval = cpg.pval, sig.cut = 0.001, 
-                        minsize = 200, maxsize = 210)
-head(res4, 15)
-```
+#### ebGSEA
+-------------------------------
+Usage: 
+`champ.ebGSEA(beta=myNorm, pheno=myLoad$pd$Sample_Group, minN=5, adjPval=0.05, arraytype="450K", cores=1)`
+
 
 ```{r}
-data(CpG2Genetoy)
-head(CpG2Gene)  
+
+#  myLoad <- champ.load(directory=system.file("extdata",package="ChAMPdata"))
+#         myNorm <- champ.norm()
+#         myGSEA.ebGSEA <- champ.ebGSEA(beta=myNorm,pheno=myLoad$pd$Sample_Group,arraytype="450K")
+#         
+#         
+# sgt.m <-doGT(phenoSMK.v,dataSMK.m,array="450k",ncores=4)
+# champ.ebGSEA(beta=myNorm, pheno=myLoad$pd$Sample_Group, minN=5, adjPval=0.05, arraytype="450K", cores=1)
+
 ```
 
-```{r}
-FullAnnot = prepareAnnot(CpG2Gene) 
-```
 
-```{r}
-GS.list = GS.list[1:10]
-res5 = methylRRA(cpg.pval = cpg.pval, FullAnnot = FullAnnot, method = "ORA", 
-                    GS.list = GS.list, GS.idtype = "SYMBOL", 
-                    minsize = 100, maxsize = 300)
-head(res5, 10)
-```
+[1] Subramanian, Aravind, Pablo Tamayo, Vamsi K Mootha, Sayan Mukherjee, Benjamin L Ebert, Michael A Gillette, Amanda Paulovich, et al. 2005. Gene Set Enrichment Analysis: A Knowledge-Based Approach for Interpreting Genome-Wide Expression Profiles. Proceedings of the National Academy of Sciences 102 (43). National Acad Sciences: 15545–50.
 
-```{r}
-res6 = methylglm(cpg.pval = cpg.pval, array.type = "450K", 
-                    GS.type = "Reactome", minsize = 100, maxsize = 110)
-head(res6, 10)
-```
+

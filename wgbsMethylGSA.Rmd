@@ -216,16 +216,56 @@ custom_annotation_simplified <- custom_annotation %>%
 str(custom_annotation_simplified)
 ```
 
-```{r}
-# Running methylglm with extracted p-values
-res1 <- methylglm(cpg.pval = diff.pval, 
-                  FullAnnot = custom_annotation_simplified, 
-                  array.type = "450K", 
-                  minsize = 200, 
-                  maxsize = 500, 
-                  GS.type = "GO")
+## Mapping CpG sites to genes: Methodology to use `methylglm` and `methylRRA` with WGBS data
+Since we are using WGBS data a particular challenge with this method is that we do not have a direct CpG-to-gene mapping. WGBS will provide
+methylation data at CpG sites across the genome but not necessarily with the gene annotations. Therefore, in order to perform gene set 
+enrichment anlysis with `methylGSA` for WGBS data, we will need to map CpG sites to genes. 
 
-# Displaying the top 15 results
+1. Using biomaRt
+Our first attempt to this will be using `biomaRt` which will help us to map the genomic coordinates of the CpG sites such as the chr, start, and end to nearby genes / gene regions.
+
+```{r}
+library(biomaRt)
+
+# Set up biomaRt to use the Ensembl genome database for the organism (mouse example)
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+# Create a list of regions in "chromosome:start-end" format for biomaRt query
+regions <- paste0(custom_annotation_simplified$Chromosome, ":", custom_annotation_simplified$Start, "-", custom_annotation_simplified$End)
+
+# Query Ensembl for gene information
+cpg_genes <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = "chromosomal_region",
+  values = regions,
+  mart = ensembl
+)
+
+# Merge gene information back with your CpG annotation
+custom_annotation_simplified <- merge(custom_annotation_simplified, cpg_genes, by.x = c("Chromosome", "Start", "End"), by.y = c("chromosome_name", "start_position", "end_position"), all.x = TRUE)
+
+# Check the updated annotation
+head(custom_annotation_simplified)
+
+```
+
+
+
+```{r}
+# Use the gene names derived from the annotation
+cpg.pval <- setNames(diff_data$pvalue, diff_data$id)
+
+# Run methylglm (or methylRRA) with the custom annotation
+res1 <- methylglm(
+  cpg.pval = cpg.pval, 
+  array.type = "custom",  
+  FullAnnot = custom_annotation_simplified,  # Your custom annotation with CpG to gene mapping
+  GS.type = "GO",  # Using Gene Ontology for enrichment
+  minsize = 200, 
+  maxsize = 500
+)
+
+# Check the results
 head(res1, 15)
 ```
 

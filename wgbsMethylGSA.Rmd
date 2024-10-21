@@ -71,7 +71,6 @@ library(readr)
 library(ggplot2)
 library(tidyr)
 library(dplyr)
-
 ```
 `percentage_data <- "data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz"`
   Rows: 17873231 Columns: 8
@@ -208,13 +207,6 @@ sum(is.na(diff.pval))  # Check for missing p-values
 ```{r}
 str(custom_annotation)
 ```
-```{r}
-# Simplify custom annotation
-custom_annotation_simplified <- custom_annotation %>%
-  select(CpG_ID, Chromosome, Start, End, Strand)
-
-str(custom_annotation_simplified)
-```
 
 ## Mapping CpG sites to genes: Methodology to use `methylglm` and `methylRRA` with WGBS data
 Since we are using WGBS data a particular challenge with this method is that we do not have a direct CpG-to-gene mapping. WGBS will provide
@@ -229,10 +221,18 @@ library(biomaRt)
 
 # Set up biomaRt to use the Ensembl genome database for the organism (mouse example)
 ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+```
 
+```{r}
+str(ensembl)
+```
+
+```{r}
 # Create a list of regions in "chromosome:start-end" format for biomaRt query
 regions <- paste0(custom_annotation_simplified$Chromosome, ":", custom_annotation_simplified$Start, "-", custom_annotation_simplified$End)
+```
 
+```{r}
 # Query Ensembl for gene information
 cpg_genes <- getBM(
   attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
@@ -240,16 +240,17 @@ cpg_genes <- getBM(
   values = regions,
   mart = ensembl
 )
-
-# Merge gene information back with your CpG annotation
-custom_annotation_simplified <- merge(custom_annotation_simplified, cpg_genes, by.x = c("Chromosome", "Start", "End"), by.y = c("chromosome_name", "start_position", "end_position"), all.x = TRUE)
-
-# Check the updated annotation
-head(custom_annotation_simplified)
-
 ```
 
+```{r]}
+# Merge gene information back with your CpG annotation
+custom_annotation_simplified$Gene <- cpg_genes$external_gene_name
+```
 
+```{r}
+# Check the updated annotation
+head(custom_annotation_simplified)
+```
 
 ```{r}
 # Use the gene names derived from the annotation
@@ -268,6 +269,7 @@ res1 <- methylglm(
 # Check the results
 head(res1, 15)
 ```
+
 
 ```{r}
 # Barplot for methylglm results

@@ -81,7 +81,11 @@ library(dplyr)
   dbl (6): start, end, SK059_2427_WT_CRX, SK060_2616_WT_CRX, SK061_2617_G34R_CRX, SK062_2428_G34R_CRX
 
 `coverage_data <- "data_maya/WTvsG34R_CRX_10W.data_meth.tsv.gz"`
-
+Rows: 17873231 Columns: 17
+── Column specification ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Delimiter: "\t"
+chr  (2): seqnames, strand
+dbl (15): start, end, width, coverage_SK059_2427_WT_CRX, numCs_SK059_2427_WT_CRX, numTs_SK059_2427_WT_CRX, coverage_SK060_2616_WT_CRX, numCs_SK060_2616_WT_C...
 
 `diff_data <- "data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz"`
 
@@ -120,6 +124,8 @@ ggplot(sample_percentage_data, aes(x = chr, y = SK059_2427_WT_CRX)) +
        y = "Methylation Percentage") +
   theme_minimal()
 ```
+
+
 ```{r}
 ggplot(sample_percentage_data, aes(x = chr)) +
   geom_boxplot(aes(y = SK059_2427_WT_CRX, fill = "SK059_2427_WT_CRX"), alpha = 0.6) +
@@ -137,4 +143,122 @@ coverage_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.data_meth.tsv.gz", 
 # Inspect the data
 print(head(coverage_data))
 ```
+
+
+```{r}
+# Read the data
+diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(diff_data))
+```
+
+To continue our analysis, we wil extract the p-values from the differential methylation data for enrichment analysis. 
+
+Note our differential methylation data is `diff_data` which holds the following columns: 
+- `chr`: chromosome 
+- `start` : starting position 
+- `end` : ending position 
+- `strand` : + / - 
+- `pvalue` : p-value 
+- `qvalue` : q-value 
+- `meth.diff` : percentage difference of methylation at each CpG in the genome between the WT group and the G34R group 
+
+```{r}
+# Creating a CpG ID based on chr, start, and end (if 'id' column is missing)
+diff_data$id <- paste0(diff_data$chr, "_", diff_data$start, "_", diff_data$end)
+
+# Creating a named vector of p-values
+diff.pval <- setNames(diff_data$pvalue, diff_data$id)
+
+# Checking the result
+head(diff.pval)
+```
+
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+```
+
+Creating a custom annotation for methylGSA:
+We will create a dataframe as our annotation 
+```{r}
+# Create a CpG site ID
+diff_data$cpg_id <- paste0(diff_data$chr, "_", diff_data$start, "_", diff_data$end)
+
+# Create a custom annotation with the columns you need
+custom_annotation <- data.frame(
+  CpG_ID = diff_data$cpg_id,
+  Chromosome = diff_data$chr,
+  Start = diff_data$start,
+  End = diff_data$end,
+  Strand = diff_data$strand,
+  pvalue = diff_data$pvalue,
+  qvalue = diff_data$qvalue,
+  meth_diff = diff_data$meth.diff
+)
+
+# Check the annotation
+head(custom_annotation)
+```
+```{r}
+sum(is.na(diff.pval))  # Check for missing p-values
+```
+
+```{r}
+str(custom_annotation)
+```
+```{r}
+# Simplify custom annotation
+custom_annotation_simplified <- custom_annotation %>%
+  select(CpG_ID, Chromosome, Start, End, Strand)
+
+str(custom_annotation_simplified)
+```
+
+```{r}
+# Running methylglm with extracted p-values
+res1 <- methylglm(cpg.pval = diff.pval, 
+                  FullAnnot = custom_annotation_simplified, 
+                  array.type = "450K", 
+                  minsize = 200, 
+                  maxsize = 500, 
+                  GS.type = "GO")
+
+# Displaying the top 15 results
+head(res1, 15)
+```
+
+```{r}
+# Barplot for methylglm results
+barplot(res1, num = 8, colorby = "pvalue")
+```
+
+
+```{r}
+# Running methylRRA with Over Representation Analysis (ORA)
+res2 <- methylRRA(cpg.pval = diff.pval, 
+                  array.type = "450K",  # Adjust if necessary
+                  method = "ORA", 
+                  minsize = 200, 
+                  maxsize = 210)
+
+# Displaying the top 15 results
+head(res2, 15)
+```
+
+perform Gene Set Enrichment Analysis (GSEA) using the ranked p-values:
+```{r}
+# Running methylRRA with GSEA method
+res3 <- methylRRA(cpg.pval = diff.pval, 
+                  array.type = "450K",  # Adjust if necessary
+                  method = "GSEA", 
+                  minsize = 200, 
+                  maxsize = 210)
+
+# Displaying the top 10 results
+head(res3, 10)
+```
+
+
 

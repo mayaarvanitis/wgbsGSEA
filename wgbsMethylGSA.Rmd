@@ -1,0 +1,140 @@
+---
+title: "wgbsMethylGSA"
+author: "Maya Arvanitis"
+date: "10/21/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
+#options for Rmd. formatting
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+```
+
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
+#installation
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+#Installing dependencies
+install.packages("remotes")
+remotes::install_github("YuLab-SMU/ggtree")
+BiocManager::install(c("enrichplot", "clusterProfiler", "methylGSA"), dependencies = TRUE)
+BiocManager::install("IlluminaHumanMethylationEPICanno.ilm10b4.hg19")
+```
+
+```{r}
+install.packages("rlang", dependencies = TRUE)
+```
+
+```{r}
+packageVersion("rlang")
+```
+
+
+```{r}
+tools::package_dependencies("methylGSA", recursive = TRUE)
+library(methylGSA)
+```
+
+```{r}
+install.packages("readr")
+```
+
+# 1. Data Visualization Steps
+
+We will be performing the methylGSA method on the following WGBS data: 
+1. `WTvsG34R_CRX_10W.percentage_meth.tsv.gz` : percentage of methylation at each CpG C in the genome
+2. `WTvsG34R_CRX_10W.data_meth.tsv.gz` : coverage and number of C and T at each CpG C in the genome
+3. `WTvsG34R_CRX_10W.diff_meth.tsv.gz` : differential methylation at each CpG C in the genome between the two groups. 
+
+We have the following groups: 
+1. WT (N=2): `SK059_2427_WT_CRX` , `SK060_2616_WT_CRX`
+2. G34R (N=2): `SK061_2617_G34R_CRX` , `SK062_2428_G34R_CRX`
+
+(samples are from cortex of 10 week old mice. Genome is mm10 or GRCm38, same just different names)
+
+```{r}
+library(readr)
+```
+
+```{r}
+read_lines("data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz", n_max = 10)
+```
+
+```{r}
+# Load the necessary libraries
+library(readr)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+```
+`percentage_data <- "data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz"`
+  Rows: 17873231 Columns: 8
+  ── Column specification ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Delimiter: "\t"
+  chr (2): id, chr
+  dbl (6): start, end, SK059_2427_WT_CRX, SK060_2616_WT_CRX, SK061_2617_G34R_CRX, SK062_2428_G34R_CRX
+
+`coverage_data <- "data_maya/WTvsG34R_CRX_10W.data_meth.tsv.gz"`
+
+
+`diff_data <- "data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz"`
+
+```{r}
+# Read the data
+percentage_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(percentage_data))
+```
+Visualize percentage data with a sample of 10000 rows.
+```{r}
+# Load dplyr for piping
+library(dplyr)
+
+# Sample 1000 rows from the percentage_data dataframe
+sample_percentage_data <- percentage_data %>% sample_n(1000)
+
+# Display the sampled data
+print(sample_percentage_data)
+```
+```{r}
+install.packages("ggplot2")
+library(ggplot2)
+```
+
+```{r}
+# Load ggplot2
+library(ggplot2)
+
+# Sample plot to visualize percentage methylation
+ggplot(sample_percentage_data, aes(x = chr, y = SK059_2427_WT_CRX)) +
+  geom_point(color = "blue", alpha = 0.6) +
+  labs(title = "Methylation levels for SK059_2427_WT_CRX", 
+       x = "Chromosome", 
+       y = "Methylation Percentage") +
+  theme_minimal()
+```
+```{r}
+ggplot(sample_percentage_data, aes(x = chr)) +
+  geom_boxplot(aes(y = SK059_2427_WT_CRX, fill = "SK059_2427_WT_CRX"), alpha = 0.6) +
+  geom_boxplot(aes(y = SK061_2617_G34R_CRX, fill = "SK061_2617_G34R_CRX"), alpha = 0.6) +
+  labs(title = "Methylation Levels: WT vs G34R", 
+       x = "Chromosome", 
+       y = "Methylation Percentage") +
+  theme_minimal()
+```
+
+```{r}
+# Read the data
+coverage_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.data_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(coverage_data))
+```
+

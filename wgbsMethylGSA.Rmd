@@ -34,14 +34,18 @@ install.packages("rlang", dependencies = TRUE)
 packageVersion("rlang")
 ```
 
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
+install.packages("cli")
+tools::package_dependencies("methylGSA", recursive = TRUE)
+```
 
 ```{r}
-tools::package_dependencies("methylGSA", recursive = TRUE)
 library(methylGSA)
 ```
 
 ```{r}
 install.packages("readr")
+install.packages("ggplot2")
 ```
 
 # 1. Data Visualization Steps
@@ -106,11 +110,6 @@ sample_percentage_data <- percentage_data %>% sample_n(1000)
 # Display the sampled data
 print(sample_percentage_data)
 ```
-```{r}
-install.packages("ggplot2")
-library(ggplot2)
-```
-
 ```{r}
 # Load ggplot2
 library(ggplot2)
@@ -179,27 +178,7 @@ library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
 library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
 ```
 
-Creating a custom annotation for methylGSA:
-We will create a dataframe as our annotation 
-```{r}
-# Create a CpG site ID
-diff_data$cpg_id <- paste0(diff_data$chr, "_", diff_data$start, "_", diff_data$end)
 
-# Create a custom annotation with the columns you need
-custom_annotation <- data.frame(
-  CpG_ID = diff_data$cpg_id,
-  Chromosome = diff_data$chr,
-  Start = diff_data$start,
-  End = diff_data$end,
-  Strand = diff_data$strand,
-  pvalue = diff_data$pvalue,
-  qvalue = diff_data$qvalue,
-  meth_diff = diff_data$meth.diff
-)
-
-# Check the annotation
-head(custom_annotation)
-```
 ```{r}
 sum(is.na(diff.pval))  # Check for missing p-values
 ```
@@ -216,20 +195,22 @@ enrichment anlysis with `methylGSA` for WGBS data, we will need to map CpG sites
 1. Using biomaRt
 Our first attempt to this will be using `biomaRt` which will help us to map the genomic coordinates of the CpG sites such as the chr, start, and end to nearby genes / gene regions.
 
+2. Using annotatr
+We will also annotate with annotatr to cross-reference for accuracy reasons, using their mm10 CpG annotations.
+
+```{r}
+BiocManager::install("annotatr")
+```
+
 ```{r}
 library(biomaRt)
+library(annotatr)
+```
 
-# Set up biomaRt to use the Ensembl genome database for the organism (mouse example)
+```{r}
+# Example: Annotate genomic coordinates using biomaRt
 ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
-```
-
-```{r}
-str(ensembl)
-```
-
-```{r}
-# Create a list of regions in "chromosome:start-end" format for biomaRt query
-regions <- paste0(custom_annotation_simplified$Chromosome, ":", custom_annotation_simplified$Start, "-", custom_annotation_simplified$End)
+regions <- paste0(diff_data$chr, ":", diff_data$start, "-", diff_data$end)
 ```
 
 ```{r}
@@ -242,65 +223,67 @@ cpg_genes <- getBM(
 )
 ```
 
-```{r]}
-# Merge gene information back with your CpG annotation
-custom_annotation_simplified$Gene <- cpg_genes$external_gene_name
+```{r}
+# Annotate with Annotatr using mm10 CpG annotations
+annotations <- build_annotations(genome = "mm10", annotations = "mm10_basicgenes")
+annotated_data <- annotate_regions(regions = diff_data, annotations = annotations)
 ```
 
 ```{r}
-# Check the updated annotation
-head(custom_annotation_simplified)
+# Merge annotation results for accuracy
+combined_annotation <- merge(cpg_genes, annotated_data, by = "chromosome_name")
 ```
 
 ```{r}
-# Use the gene names derived from the annotation
-cpg.pval <- setNames(diff_data$pvalue, diff_data$id)
+# Create CpG site ID
+diff_data$id <- paste0(diff_data$chr, "_", diff_data$start, "_", diff_data$end)
+pval_vector <- setNames(diff_data$pvalue, diff_data$id)
 
-# Run methylglm (or methylRRA) with the custom annotation
-res1 <- methylglm(
-  cpg.pval = cpg.pval, 
-  array.type = "custom",  
-  FullAnnot = custom_annotation_simplified,  # Your custom annotation with CpG to gene mapping
-  GS.type = "GO",  # Using Gene Ontology for enrichment
-  minsize = 200, 
+# Prepare custom annotation
+custom_annotation <- data.frame(
+  CpG_ID = diff_data$id,
+  Chromosome = diff_data$chr,
+  Start = diff_data$start,
+  End = diff_data$end,
+  Strand = diff_data$strand,
+  pvalue = diff_data$pvalue,
+  qvalue = diff_data$qvalue,
+  meth_diff = diff_data$meth.diff
+)
+
+head(custom_annotation)
+
+```
+
+```{r}
+library(methylGSA)
+
+# Run methylglm with custom parameters
+results <- methylglm(
+  cpg.pval = pval_vector, 
+  array.type = "custom",
+  FullAnnot = custom_annotation,
+  GS.type = "GO",  # Using Gene Ontology
+  minsize = 200,
   maxsize = 500
 )
 
-# Check the results
-head(res1, 15)
+# Display the top results
+head(results, 15)
 ```
 
-
 ```{r}
+library(ggplot2)
+
 # Barplot for methylglm results
-barplot(res1, num = 8, colorby = "pvalue")
+barplot(results, num = 8, colorby = "pvalue")
+
+# Additional visualization
+ggplot(results, aes(x = reorder(GeneSet, -pvalue), y = -log10(pvalue))) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top Enriched Gene Sets", x = "Gene Set", y = "-log10(p-value)") +
+  theme_minimal()
 ```
-
-
-```{r}
-# Running methylRRA with Over Representation Analysis (ORA)
-res2 <- methylRRA(cpg.pval = diff.pval, 
-                  array.type = "450K",  # Adjust if necessary
-                  method = "ORA", 
-                  minsize = 200, 
-                  maxsize = 210)
-
-# Displaying the top 15 results
-head(res2, 15)
-```
-
-perform Gene Set Enrichment Analysis (GSEA) using the ranked p-values:
-```{r}
-# Running methylRRA with GSEA method
-res3 <- methylRRA(cpg.pval = diff.pval, 
-                  array.type = "450K",  # Adjust if necessary
-                  method = "GSEA", 
-                  minsize = 200, 
-                  maxsize = 210)
-
-# Displaying the top 10 results
-head(res3, 10)
-```
-
 
 

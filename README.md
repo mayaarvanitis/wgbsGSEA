@@ -58,6 +58,8 @@ To evaluate and implement GSEA methods for WGBS data, this project will follow t
 ---
 ### References
 [1] Xu Ren and Pei Fen Kuan. methylgsa documentation: Gene set analysis for methylation data. Available at: https://www.bioconductor.org/packages/release/bioc/vignettes/methylGSA/inst/doc/methylGSA-vignette.html.
+
 [2] Dong Dong, Yuan Tian, Shu-Cheng Zheng, and Andrew E. Teschendorff. ebgsea: An improved gene set enrichment analysis method for epigenome-wide-association studies. Bioinformatics, 35(18):3514–3516, Sep 2019.
+
 [3] Sima Khazaei, Carol CL Chen, Augusto Faria Andrade, et al. Single substitution in h3.3g34 alters dnmt3a recruitment to cause progressive neurodegeneration. Cell, 186(6):1162–1178, 2023.
 

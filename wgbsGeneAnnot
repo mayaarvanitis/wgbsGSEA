@@ -1,0 +1,142 @@
+---
+title: "wgbsGeneAnnot"
+author: "Maya Arvanitis"
+date: "10/28/2024"
+output: html_document
+---
+
+---
+title: "wgbsGeneAnnot"
+author: "Maya Arvanitis"
+date: "10/28/2024"
+output: html_document
+---
+
+## Introduction
+
+Whole genome bisulfite sequencing (WGBS) is a powerful technique used to assess DNA methylation across the entire genome at single-base resolution. 
+
+Unlike array-based methods, which focus on a limited set of CpG sites, WGBS provides a comprehensive view of methylation patterns, offering the potential to uncover novel regulatory elements and regions associated with gene expression.
+
+However, a challenge with WGBS data is the lack of direct mapping between CpG sites and gene annotations, making it necessary to perform additional gene annotation steps to link methylation changes to specific genes and biological functions.
+
+## Purpose of Gene Annotation in WGBS Analysis
+
+The goal of gene annotation in WGBS analysis is to map CpG sites to their corresponding genes or regulatory regions, enabling functional interpretation of the observed methylation patterns. 
+
+Without this mapping, it would be difficult to understand the biological significance of differentially methylated regions (DMRs) or sites, limiting the ability to link epigenetic changes to gene expression and cellular functions. 
+
+Gene annotation allows researchers to perform downstream analyses such as gene set enrichment analysis, pathway analysis, and integration with other genomic data.
+
+## Methodology
+
+Gene annotation for WGBS involves linking CpG sites with nearby genes based on their genomic coordinates. This process can be challenging because WGBS data provides information on methylation at individual CpG sites scattered throughout the genome, rather than pre-defined CpG regions associated with genes. 
+
+The following steps will be used to perform gene annotation:
+
+1. **Mapping Genomic Coordinates to Genes:** 
+
+   The first step is to map the coordinates of the CpG sites (chromosome, start, and end positions) to nearby genes. This can be done using external gene annotation databases such as Ensembl or UCSC, which provide the genomic locations of genes and other functional elements. Tools like `biomaRt` or `annotatr` can facilitate this process by querying these databases for gene information based on the provided coordinates.
+
+2. **Annotating with Genomic Ranges:** 
+
+   In cases where CpG sites do not fall directly within gene bodies, it may be necessary to extend the search to include nearby regulatory regions (e.g., promoters or enhancers) by using a genomic range overlap approach. This involves defining a window around each CpG site and checking for overlaps with annotated gene regions using packages like `GenomicRanges`.
+
+3. **Validation and Cross-Referencing:** 
+
+   To ensure the accuracy of the annotation, multiple sources of gene annotations can be used to cross-reference the mapped genes. For instance, gene assignments from both `biomaRt` and `annotatr` can be compared, and only consistent annotations may be retained.
+
+4. **Handling Ambiguities:** 
+
+   In some cases, a CpG site may overlap with more than one gene or may be located in intergenic regions. In such cases, appropriate rules will be defined to assign the CpG site to the most relevant gene, or to mark it as intergenic if no clear assignment can be made.
+
+This gene annotation process is a crucial step in linking WGBS methylation data to biological functions, enabling a more meaningful interpretation of the epigenetic changes observed in the data.
+
+Note: In this file I will be working with a sample of the differential methylation data (N = 10 000) simply for running time / debugging purposes.
+
+```{r}
+# Load necessary libraries
+library(biomaRt)
+library(annotatr)
+library(GenomicRanges)
+library(dplyr)
+library(readr)
+library(ggplot2)
+```
+
+```{r}
+# Read the data
+diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(diff_data))
+```
+
+```{r}
+# Load the dplyr library for data manipulation
+library(dplyr)
+
+# Sample 10,000 rows from the original diff_data dataframe
+# Adjust the number of rows as needed for your use case
+sample_diff_data <- diff_data %>% sample_n(10000)
+
+# Check the sampled data
+head(sample_diff_data)
+```
+
+Now, we have a sample of N = 10 000 to work with. `sample_diff_data`
+
+```{r}
+# Step 1: Mapping Genomic Coordinates to Genes using biomaRt
+# Connect to the Ensembl database for mouse genome annotation
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://useast.ensembl.org")
+```
+
+```{r}
+# Query gene annotations based on chromosome and position
+gene_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = "chromosomal_region",
+  values = paste0(sample_diff_data$chr, ":", sample_diff_data$start, "-", sample_diff_data$end),
+  mart = ensembl
+)
+
+head(gene_annotations,100)
+tail(gene_annotations,100)
+```
+
+```{r}
+# Step 2: Create a GRanges object for the gene annotations
+gr_genes <- GRanges(
+  seqnames = gene_annotations$chromosome_name,
+  ranges = IRanges(
+    start = gene_annotations$start_position,
+    end = gene_annotations$end_position
+  ),
+  strand = "*",
+  gene = gene_annotations$external_gene_name
+)
+
+head(gr_genes)
+```
+
+```{r}
+# Step 2.5: Create a GRanges object for the sample differential methylation data
+gr_sample <- GRanges(
+  seqnames = sample_diff_data$chr,
+  ranges = IRanges(
+    start = sample_diff_data$start - 1000,  # Adding padding to extend the range for better overlap detection
+    end = sample_diff_data$end + 1000
+  ),
+  strand = "*"
+)
+head(gr_sample)
+```
+
+```{r}
+# Step 3: Find overlaps between the differential methylation data and gene annotations
+overlaps <- findOverlaps(gr_sample, gr_genes)
+```
+
+
+

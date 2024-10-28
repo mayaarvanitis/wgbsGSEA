@@ -99,6 +99,7 @@ percentage_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.percentage_meth.t
 # Inspect the data
 print(head(percentage_data))
 ```
+
 Visualize percentage data with a sample of 10000 rows.
 ```{r}
 # Load dplyr for piping
@@ -110,6 +111,7 @@ sample_percentage_data <- percentage_data %>% sample_n(1000)
 # Display the sampled data
 print(sample_percentage_data)
 ```
+
 ```{r}
 # Load ggplot2
 library(ggplot2)
@@ -206,12 +208,34 @@ BiocManager::install("annotatr")
 library(biomaRt)
 library(annotatr)
 ```
+```{r}
+# Load the dplyr library for data manipulation
+library(dplyr)
+
+# Sample 10,000 rows from the original diff_data dataframe
+# Adjust the number of rows as needed for your use case
+sample_diff_data <- diff_data %>% sample_n(10000)
+
+# Check the sampled data
+head(sample_diff_data)
+```
+
+Note: have not changed yet to work with entire DF. Using a sample of diff_data (N = 10 000) for debugging purposes (Oct28/2024)
 
 ```{r}
 # Example: Annotate genomic coordinates using biomaRt
 ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
-regions <- paste0(diff_data$chr, ":", diff_data$start, "-", diff_data$end)
+regions <- paste0(sample_diff_data$chr, ":", sample_diff_data$start, "-", sample_diff_data$end)
 ```
+
+```{r}
+# Display the structure of the dataframe
+str(regions)
+
+# Show the first few rows
+head(regions)
+```
+
 
 ```{r}
 # Query Ensembl for gene information
@@ -222,48 +246,169 @@ cpg_genes <- getBM(
   mart = ensembl
 )
 ```
+```{r}
+# Display the structure of the dataframe
+str(cpg_genes)
+
+# Show the first few rows
+head(cpg_genes)
+```
+```{r}
+# Extract a list of unique gene names, excluding any empty or missing values
+gene_names <- cpg_genes %>%
+  filter(external_gene_name != "") %>% # Filter out missing gene names
+  distinct(external_gene_name) %>%     # Select unique gene names
+  pull(external_gene_name)             # Extract as a vector
+
+# Display the list of gene names
+print(gene_names)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Count the number of genes per chromosome
+chromosome_gene_counts <- cpg_genes %>%
+  group_by(chromosome_name) %>%
+  summarize(GeneCount = n())
+
+# Plot the distribution of gene counts across chromosomes
+ggplot(chromosome_gene_counts, aes(x = chromosome_name, y = GeneCount)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Distribution of Gene Counts Across Chromosomes",
+       x = "Chromosome",
+       y = "Number of Genes") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
 
 ```{r}
 # Annotate with Annotatr using mm10 CpG annotations
 annotations <- build_annotations(genome = "mm10", annotations = "mm10_basicgenes")
-annotated_data <- annotate_regions(regions = diff_data, annotations = annotations)
 ```
 
 ```{r}
-# Merge annotation results for accuracy
-combined_annotation <- merge(cpg_genes, annotated_data, by = "chromosome_name")
-```
+library(GenomicRanges)
 
-```{r}
-# Create CpG site ID
-diff_data$id <- paste0(diff_data$chr, "_", diff_data$start, "_", diff_data$end)
-pval_vector <- setNames(diff_data$pvalue, diff_data$id)
-
-# Prepare custom annotation
-custom_annotation <- data.frame(
-  CpG_ID = diff_data$id,
-  Chromosome = diff_data$chr,
-  Start = diff_data$start,
-  End = diff_data$end,
-  Strand = diff_data$strand,
-  pvalue = diff_data$pvalue,
-  qvalue = diff_data$qvalue,
-  meth_diff = diff_data$meth.diff
+# Create a GRanges object from sample_diff_data
+# Assuming sample_diff_data has columns named 'chr', 'start', and 'end'
+granges_data <- GRanges(
+  seqnames = sample_diff_data$chr,
+  ranges = IRanges(start = sample_diff_data$start, end = sample_diff_data$end),
+  strand = "*"
 )
 
-head(custom_annotation)
+# Check the GRanges object
+granges_data
+```
+```{r}
+# Add "chr" prefix to chromosome names if necessary
+seqlevels(granges_data) <- paste0("chr", seqlevels(granges_data))
 
+# Check the updated GRanges object
+granges_data
+```
+
+```{r}
+annotated_data <- annotate_regions(regions = granges_data, annotations = annotations)
+head(annotated_data)
+```
+```{r}
+# Display column names in cpg_genes
+colnames(cpg_genes)
+
+# Display column names in annotated_data
+colnames(mcols(annotated_data))  # Use mcols() for metadata columns in GRanges
+```
+
+```{r}
+# Convert annotated_data (GRanges) to a dataframe, including seqnames, start, end, and metadata
+annotated_data_df <- data.frame(
+  chromosome_name = as.character(seqnames(annotated_data)),
+  start_position = start(annotated_data),
+  end_position = end(annotated_data),
+  annotation = mcols(annotated_data)$annot
+)
+
+# Check the resulting dataframe
+head(annotated_data_df)
+```
+```{r}
+# Merge cpg_genes with annotated_data_df on chromosome_name, start_position, and end_position
+combined_annotation <- merge(
+  cpg_genes, 
+  annotated_data_df, 
+  by = c("chromosome_name", "start_position", "end_position"),
+  all.x = TRUE  # Use all.x = TRUE to keep all rows from cpg_genes, even if no match in annotated_data_df
+)
+
+# Check the combined dataframe
+head(combined_annotation)
+```
+
+```{r}
+# Assuming 'diff_data' contains the CpG site information (chr, start, end)
+# and 'cpg_genes' contains the gene annotations retrieved from biomaRt
+
+# Create a unique identifier for the CpG sites in 'diff_data'
+sample_diff_data$cpg_id <- paste0(sample_diff_data$chr, "_", sample_diff_data$start, "_", sample_diff_data$end)
+
+# Merge 'diff_data' with 'cpg_genes' based on overlapping coordinates
+# Assuming 'cpg_genes' has columns: 'chromosome_name', 'start_position', 'end_position', 'external_gene_name'
+merged_data <- merge(
+  sample_diff_data,
+  cpg_genes,
+  by.x = c("chr", "start", "end"),
+  by.y = c("chromosome_name", "start_position", "end_position"),
+  all.x = TRUE
+)
+
+# Rename columns for consistency
+colnames(merged_data)[colnames(merged_data) == "external_gene_name"] <- "Gene"
+
+# Check the merged data
+head(merged_data)
+```
+
+
+```{r}
+# Replace missing gene names with "Unknown"
+merged_data$external_gene_name[is.na(merged_data$external_gene_name)] <- "Unknown"
+
+# Create the custom annotation dataframe for methylglm, excluding "Unknown" genes
+custom_annotation <- data.frame(
+  CpG_ID = merged_data$cpg_id,
+  Chromosome = merged_data$chr,
+  Start = merged_data$start,
+  End = merged_data$end,
+  Gene = merged_data$external_gene_name,
+  pvalue = merged_data$pvalue,
+  qvalue = merged_data$qvalue,
+  meth_diff = merged_data$meth.diff
+)
+
+# Filter out rows where the Gene is "Unknown"
+custom_annotation <- custom_annotation %>%
+  filter(Gene != "Unknown")
+
+# Check the filtered custom annotation
+head(custom_annotation)
+```
+
+```{r}
+table(custom_annotation$Gene)
 ```
 
 ```{r}
 library(methylGSA)
 
-# Run methylglm with custom parameters
+# Run methylglm with the custom annotation
 results <- methylglm(
-  cpg.pval = pval_vector, 
+  cpg.pval = setNames(merged_data$pvalue, merged_data$cpg_id),  # p-values named by CpG ID
   array.type = "custom",
-  FullAnnot = custom_annotation,
-  GS.type = "GO",  # Using Gene Ontology
+  FullAnnot = custom_annotation,  # Your custom annotation
+  GS.type = "GO",  # Gene Ontology as the gene set type
   minsize = 200,
   maxsize = 500
 )

@@ -71,6 +71,7 @@ diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_
 # Inspect the data
 print(head(diff_data))
 ```
+
 We will filter the data to select for significant p-values first.
 ```{r}
 significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
@@ -104,15 +105,41 @@ ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https:
 
 ```{r}
 #Gene annotation function -------------------------------------
+# Step 2: Modify the `annotate_genes` function to join with `cpg_id` after retrieving annotations
 annotate_genes <- function(data) {
+    # Retrieve gene annotations based on chromosomal regions
     gene_annotations <- getBM(
         attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
         filters = "chromosomal_region",
         values = paste0(data$chr, ":", data$start, "-", data$end),
         mart = ensembl
     )
-    return(gene_annotations)
+    # Rename columns to match `hyper_cpgs` column names for a successful join
+    gene_annotations <- gene_annotations %>%
+      rename(
+        chr = chromosome_name,
+        start = start_position,
+        end = end_position,
+        gene = external_gene_name
+      )
+    
+    # Step 3: Merge with `data` by matching `chr`, `start`, `end`
+    annotated_data <- merge(data, gene_annotations, by = c("chr", "start", "end"))
+    return(annotated_data)
 }
+
+```
+
+```{r}
+# Step 1: Add CpG_ID to hyper_cpgs
+hyper_cpgs <- hyper_cpgs %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+hypo_cpgs <- hypo_cpgs %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+head(hyper_cpgs)
+head(hypo_cpgs)
 ```
 
 ```{r}
@@ -122,6 +149,58 @@ hypo_genes <- annotate_genes(hypo_cpgs)
 
 head(hyper_genes)
 head(hypo_genes)
+```
+
+```{r}
+# Save the hyper_genes and hypo_genes objects as .rds files
+saveRDS(hyper_genes, file = "hyper_genes.rds")
+saveRDS(hypo_genes, file = "hypo_genes.rds")
+```
+
+```{r}
+# Load the hyper_genes and hypo_genes objects from the .rds files
+hyper_genes <- readRDS("rds/hyper_genes.rds")
+hypo_genes <- readRDS("rds/hypo_genes.rds")
+hyper_cpgs <- readRDS("rds/hyper_cpgs.rds")
+hypo_cpgs <- readRDS("rds/hyper_cpgs.rds")
+```
+
+
+
+Create CpG Ids:
+```{r}
+# Step 1: Create a unique identifier for each CpG site based on chr, start, and end
+hyper_cpgs <- hyper_cpgs %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+hyper_genes <- hyper_genes %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+# Step 2: Identify the common CpG IDs in both data frames
+common_cpg_ids <- intersect(hyper_cpgs$cpg_id, hyper_genes$cpg_id)
+
+# Step 3: Filter both data frames to keep only matching entries
+filtered_hyper_cpgs <- hyper_cpgs %>% filter(cpg_id %in% common_cpg_ids)
+filtered_hyper_genes <- hyper_genes %>% filter(cpg_id %in% common_cpg_ids)
+
+# Optional: Arrange by cpg_id to align rows for further analysis or merging
+filtered_hyper_cpgs <- filtered_hyper_cpgs %>% arrange(cpg_id)
+filtered_hyper_genes <- filtered_hyper_genes %>% arrange(cpg_id)
+
+# Check the filtered data frames
+head(filtered_hyper_cpgs)
+head(filtered_hyper_genes)
+
+```
+
+```{r}
+library(methylGSA)
+```
+
+```{r}
+# Check the first few rows to ensure the structure is correct
+head(hyper_genes)
+head(hyper_cpgs)
 ```
 
 ```{r}

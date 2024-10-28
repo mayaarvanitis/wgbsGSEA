@@ -54,7 +54,7 @@ This gene annotation process is a crucial step in linking WGBS methylation data 
 
 Note: In this file I will be working with a sample of the differential methylation data (N = 10 000) simply for running time / debugging purposes.
 
-```{r}
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
 # Load necessary libraries
 library(biomaRt)
 library(annotatr)
@@ -71,72 +71,81 @@ diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_
 # Inspect the data
 print(head(diff_data))
 ```
-
+We will filter the data to select for significant p-values first.
 ```{r}
-# Load the dplyr library for data manipulation
-library(dplyr)
-
-# Sample 10,000 rows from the original diff_data dataframe
-# Adjust the number of rows as needed for your use case
-sample_diff_data <- diff_data %>% sample_n(10000)
-
-# Check the sampled data
-head(sample_diff_data)
+significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
 ```
 
-Now, we have a sample of N = 10 000 to work with. `sample_diff_data`
+Now, we can separate this data into 2 groups: 
+1. p-values with positive changes (hypermethylation)
+2. p-values with negative changes (hypomethylation)
+
+```{r}
+hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
+hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+
+head(hyper_cpgs)
+head(hypo_cpgs)
+dim(hyper_cpgs)
+dim(hypo_cpgs)
+```
+
+Now we have two groups we are working with:
+1. `hyper_cpgs` : 629752
+2. `hypo_cpgs` : 755228
+
+We will now perform gene annotation using biomaRt.
 
 ```{r}
 # Step 1: Mapping Genomic Coordinates to Genes using biomaRt
 # Connect to the Ensembl database for mouse genome annotation
-ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://useast.ensembl.org")
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
 ```
 
 ```{r}
-# Query gene annotations based on chromosome and position
-gene_annotations <- getBM(
-  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
-  filters = "chromosomal_region",
-  values = paste0(sample_diff_data$chr, ":", sample_diff_data$start, "-", sample_diff_data$end),
-  mart = ensembl
+#Gene annotation function -------------------------------------
+annotate_genes <- function(data) {
+    gene_annotations <- getBM(
+        attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+        filters = "chromosomal_region",
+        values = paste0(data$chr, ":", data$start, "-", data$end),
+        mart = ensembl
+    )
+    return(gene_annotations)
+}
+```
+
+```{r}
+#Function calls for both hyper/hypo methylated CpGs 
+hyper_genes <- annotate_genes(hyper_cpgs)
+hypo_genes <- annotate_genes(hypo_cpgs)
+
+head(hyper_genes)
+head(hypo_genes)
+```
+
+```{r}
+# methylglm call for hypermethylated cpgs
+methylglm_results_pos <- methylglm(
+    cpg.pval = setNames(hyper_cpgs$pvalue, hyper_cpgs$cpg_id),
+    array.type = "custom",
+    FullAnnot = hyper_genes,
+    GS.type = "GO",
+    minsize = 200,
+    maxsize = 500
 )
-
-head(gene_annotations,100)
-tail(gene_annotations,100)
 ```
 
 ```{r}
-# Step 2: Create a GRanges object for the gene annotations
-gr_genes <- GRanges(
-  seqnames = gene_annotations$chromosome_name,
-  ranges = IRanges(
-    start = gene_annotations$start_position,
-    end = gene_annotations$end_position
-  ),
-  strand = "*",
-  gene = gene_annotations$external_gene_name
+# methylglm call for hypomethylated cpgs 
+methylglm_results_neg <- methylglm(
+    cpg.pval = setNames(hypo_cpgs$pvalue, hypo_cpgs$cpg_id),
+    array.type = "custom",
+    FullAnnot = hypo_genes,
+    GS.type = "GO",
+    minsize = 200,
+    maxsize = 500
 )
-
-head(gr_genes)
 ```
-
-```{r}
-# Step 2.5: Create a GRanges object for the sample differential methylation data
-gr_sample <- GRanges(
-  seqnames = sample_diff_data$chr,
-  ranges = IRanges(
-    start = sample_diff_data$start - 1000,  # Adding padding to extend the range for better overlap detection
-    end = sample_diff_data$end + 1000
-  ),
-  strand = "*"
-)
-head(gr_sample)
-```
-
-```{r}
-# Step 3: Find overlaps between the differential methylation data and gene annotations
-overlaps <- findOverlaps(gr_sample, gr_genes)
-```
-
 
 

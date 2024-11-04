@@ -160,7 +160,10 @@ hyper_annotations <- hyper_annotations %>%
 head(hyper_annotations)
 ```
 ```{r}
+library(dplyr)
 # Assume hyper_cpgs_subset has a 'cpg_id' column with the format "chr_start_end"
+
+hyper_cpgs_subset <- as.data.frame(hyper_cpgs_subset)
 # Extract chr, start, and end from cpg_id
 hyper_cpgs_subset <- hyper_cpgs_subset %>%
   mutate(
@@ -200,13 +203,15 @@ mapped_genes <- data.frame(
   ensembl_gene_id = mcols(gene_gr)$ensembl_gene_id[subjectHits(overlaps)]
 )
 
-# Optional: Merge mapped CpG-gene pairs with original annotations
-annotated_genes <- left_join(mapped_genes, hyper_annotations, by = "ensembl_gene_id")
+hyper_cpgs_subset <- as_tibble(hyper_cpgs_subset)
 
-# Display the result
-head(annotated_genes)
+# Now, retry the join operation with dplyr::select
+mapped_genes <- mapped_genes %>%
+  left_join(hyper_cpgs_subset %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
+
+# Check the result
+print(head(mapped_genes))
 ```
-
 
 ```{r}
 # Save the hyper_genes and hypo_genes objects as .rds files
@@ -227,18 +232,105 @@ library(methylGSA)
 ```
 
 ```{r}
-# Check the first few rows to ensure the structure is correct
-head(hyper_genes)
-head(hyper_cpgs)
+cpg_pval <- setNames(mapped_genes$pvalue, mapped_genes$cpg_id)
+head(cpg_pval)
+```
+
+
+
+```{r}
+# Check the column names in mapped_genes
+colnames(mapped_genes)
+# Ensure that `mapped_genes` has only the CpG and Gene columns
+mapped_genes_prepared <- mapped_genes[, c("cpg_id", "ensembl_gene_id")]
+
+# Rename columns to match the expected format for `prepareAnnot`
+colnames(mapped_genes_prepared) <- c("CpG", "Gene")
+
+# Remove duplicate CpG-Gene pairs to ensure unique CpG identifiers
+mapped_genes_prepared <- mapped_genes_prepared[!duplicated(mapped_genes_prepared$CpG), ]
+
+# Verify that there are no duplicates
+any(duplicated(mapped_genes_prepared$CpG))  # Should return FALSE
+
+# Retrieve gene symbols for each Ensembl gene ID
+gene_symbols <- getBM(
+    attributes = c("ensembl_gene_id", "mgi_symbol"),  # Using "mgi_symbol" for mouse gene symbols
+    filters = "ensembl_gene_id",
+    values = mapped_genes_prepared$Gene,
+    mart = ensembl
+)
+
+# Merge gene symbols back with the mapped CpG data
+mapped_genes_prepared <- merge(
+    mapped_genes_prepared,
+    gene_symbols,
+    by.x = "Gene",
+    by.y = "ensembl_gene_id",
+    all.x = TRUE
+)
+
+# Replace Ensembl IDs with gene symbols in FullAnnot
+FullAnnot <- mapped_genes_prepared[, c("CpG", "mgi_symbol")]
+colnames(FullAnnot) <- c("cpg", "gene")  # Rename to expected format
+head(FullAnnot)
+```
+```{r}
+# Load necessary libraries
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(GenomicRanges)
+library(AnnotationHub)
+library(biomaRt)
+library(dplyr)
+
+# Step 1: Get CpG sites in mm10
+genome <- BSgenome.Mmusculus.UCSC.mm10
+cpg_sites <- GRanges(seqnames = seqnames(genome),
+                     ranges = IRanges(start = start(genome), width = 1))
+
+# Filter only CpG dinucleotides
+cpg_gr <- cpg_sites[which(genome[cpg_sites] == "CG")]
+
+# Assign unique IDs to each CpG site in mm10, similar to 'cg####'
+cpg_df <- as.data.frame(cpg_gr)
+cpg_df <- cpg_df %>%
+  mutate(cg_id = paste0("cg", sprintf('%08d', 1:n())))
+
+# Step 2: Map CpG sites to Genes using biomaRt
+# Connect to Ensembl for mm10 gene annotations
+mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+# Get gene information (adjust fields as needed)
+genes <- getBM(attributes = c("ensembl_gene_id", "chromosome_name", "start_position", "end_position", "strand"),
+               mart = mart)
+
+# Convert gene information to GenomicRanges
+gene_gr <- GRanges(seqnames = genes$chromosome_name,
+                   ranges = IRanges(start = genes$start_position, end = genes$end_position),
+                   strand = genes$strand,
+                   gene_id = genes$ensembl_gene_id)
+
+# Find overlaps between CpG sites and genes
+overlaps <- findOverlaps(cpg_gr, gene_gr)
+
+# Create a mapping data frame
+cpg_to_gene <- data.frame(
+  cg_id = cpg_df$cg_id[queryHits(overlaps)],
+  ensembl_gene_id = genes$ensembl_gene_id[subjectHits(overlaps)]
+)
+
+# Now you have a custom CpG to gene mapping for mm10
+# Save this mapping to a file for use with methylGSA
+write.csv(cpg_to_gene, "cpg_to_gene_mapping_mm10.csv", row.names = FALSE)
 ```
 
 ```{r}
-# methylglm call for hypermethylated cpgs
+# Run the methylglm function
 methylglm_results_pos <- methylglm(
-    cpg.pval = setNames(hyper_cpgs$pvalue, hyper_cpgs$cpg_id),
+    cpg.pval = cpg_pval,
     array.type = "custom",
-    FullAnnot = hyper_genes,
-    GS.type = "GO",
+    FullAnnot = FullAnnot,   # Ensure this is a properly formatted annotation data frame for CpGs
+    GS.type = "GO",            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
     minsize = 200,
     maxsize = 500
 )

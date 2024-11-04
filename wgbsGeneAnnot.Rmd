@@ -275,101 +275,6 @@ FullAnnot <- mapped_genes_prepared[, c("CpG", "mgi_symbol")]
 colnames(FullAnnot) <- c("cpg", "gene")  # Rename to expected format
 head(FullAnnot)
 ```
-```{r}
-# Install the required packages if not already installed
-if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-BiocManager::install("AnnotationHub")
-BiocManager::install("TxDb.Mmusculus.UCSC.mm10.knownGene")
-```
-
-```{r}
-library(AnnotationHub)
-library(GenomicRanges)
-library(TxDb.Mmusculus.UCSC.mm10.knownGene)
-
-ah <- AnnotationHub()
-txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
-
-# Retrieve gene coordinates
-genes_mm10_gr<- genes(txdb)
-head(genes_mm10_gr)
-```
-
-```{r}
-
-cpg_mapped_genes <- mapped_genes %>%
-  mutate(
-    chromosome = sub("^(.*)_.*_.*$", "\\1", cpg_id),
-    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
-    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
-  )
-
-# Assuming `mapped_genes` is your data frame with CpG site information
-# Convert mapped CpG sites to GRanges
-cpg_gr <- GRanges(
-    seqnames = Rle(cpg_mapped_genes$chromosome),
-    ranges = IRanges(start = cpg_mapped_genes$start, end = cpg_mapped_genes$end),
-    cpg_id = cpg_mapped_genes$cpg_id
-)
-
-head(cpg_gr)
-# Find overlaps with gene annotations
-overlaps <- findOverlaps(cpg_gr, genes_mm10_gr)
-mapped_genes <- data.frame(
-    CpG = mapped_genes$cpg_id[queryHits(overlaps)],
-    Gene = genes_mm10_gr$gene_id[subjectHits(overlaps)]
-)
-```
-
-```{r}
-# Load necessary libraries
-library(BSgenome.Mmusculus.UCSC.mm10)
-library(GenomicRanges)
-library(AnnotationHub)
-library(biomaRt)
-library(dplyr)
-
-# Step 1: Get CpG sites in mm10
-genome <- BSgenome.Mmusculus.UCSC.mm10
-cpg_sites <- GRanges(seqnames = seqnames(genome),
-                     ranges = IRanges(start = start(genome), width = 1))
-
-# Filter only CpG dinucleotides
-cpg_gr <- cpg_sites[which(genome[cpg_sites] == "CG")]
-
-# Assign unique IDs to each CpG site in mm10, similar to 'cg####'
-cpg_df <- as.data.frame(cpg_gr)
-cpg_df <- cpg_df %>%
-  mutate(cg_id = paste0("cg", sprintf('%08d', 1:n())))
-
-# Step 2: Map CpG sites to Genes using biomaRt
-# Connect to Ensembl for mm10 gene annotations
-mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
-
-# Get gene information (adjust fields as needed)
-genes <- getBM(attributes = c("ensembl_gene_id", "chromosome_name", "start_position", "end_position", "strand"),
-               mart = mart)
-
-# Convert gene information to GenomicRanges
-gene_gr <- GRanges(seqnames = genes$chromosome_name,
-                   ranges = IRanges(start = genes$start_position, end = genes$end_position),
-                   strand = genes$strand,
-                   gene_id = genes$ensembl_gene_id)
-
-# Find overlaps between CpG sites and genes
-overlaps <- findOverlaps(cpg_gr, gene_gr)
-
-# Create a mapping data frame
-cpg_to_gene <- data.frame(
-  cg_id = cpg_df$cg_id[queryHits(overlaps)],
-  ensembl_gene_id = genes$ensembl_gene_id[subjectHits(overlaps)]
-)
-
-# Now you have a custom CpG to gene mapping for mm10
-# Save this mapping to a file for use with methylGSA
-write.csv(cpg_to_gene, "cpg_to_gene_mapping_mm10.csv", row.names = FALSE)
-```
 
 ```{r}
 if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -383,17 +288,29 @@ library(msigdb)
 library(ExperimentHub)
 library(GSEABase)
 ```
-```{r}
-remove.packages("AnnotationHub")
-install.packages("BiocManager")
-BiocManager::install("AnnotationHub")
-```
 
 ```{r}
 #retrieve hallmark mouse 
+# Retrieve hallmark gene sets for mouse
 msigdb.mm = getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
+
 hallmarks = subsetCollection(msigdb.mm, 'h')
-print(hallmarks)
+```
+
+```{r}
+# Convert hallmarks to a list of gene symbols by hallmark name
+hallmarks_list <- lapply(hallmarks, function(gs) {
+  # Extract gene symbols and set name for each GeneSet object
+  setNames(list(gs@geneIds), gs@setName)
+})
+
+# Flatten the list structure to obtain a single list with hallmark names as keys
+hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
+
+```
+
+```{r}
+library(methylGSA)
 ```
 
 ```{r}
@@ -402,7 +319,7 @@ methylglm_results_pos <- methylglm(
     cpg.pval = cpg_pval,
     array.type = "custom",
     FullAnnot = FullAnnot,   # Ensure this is a properly formatted annotation data frame for CpGs
-    GS.type = "hallmarks",            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
+    GS.type = hallmarks_list,            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
     minsize = 200,
     maxsize = 500
 )

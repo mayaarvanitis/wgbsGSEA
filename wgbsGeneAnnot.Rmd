@@ -276,6 +276,53 @@ colnames(FullAnnot) <- c("cpg", "gene")  # Rename to expected format
 head(FullAnnot)
 ```
 ```{r}
+# Install the required packages if not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("AnnotationHub")
+BiocManager::install("TxDb.Mmusculus.UCSC.mm10.knownGene")
+```
+
+```{r}
+library(AnnotationHub)
+library(GenomicRanges)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+
+ah <- AnnotationHub()
+txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
+
+# Retrieve gene coordinates
+genes_mm10_gr<- genes(txdb)
+head(genes_mm10_gr)
+```
+
+```{r}
+
+cpg_mapped_genes <- mapped_genes %>%
+  mutate(
+    chromosome = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Assuming `mapped_genes` is your data frame with CpG site information
+# Convert mapped CpG sites to GRanges
+cpg_gr <- GRanges(
+    seqnames = Rle(cpg_mapped_genes$chromosome),
+    ranges = IRanges(start = cpg_mapped_genes$start, end = cpg_mapped_genes$end),
+    cpg_id = cpg_mapped_genes$cpg_id
+)
+
+head(cpg_gr)
+# Find overlaps with gene annotations
+overlaps <- findOverlaps(cpg_gr, genes_mm10_gr)
+mapped_genes <- data.frame(
+    CpG = mapped_genes$cpg_id[queryHits(overlaps)],
+    Gene = genes_mm10_gr$gene_id[subjectHits(overlaps)]
+)
+```
+
+```{r}
 # Load necessary libraries
 library(BSgenome.Mmusculus.UCSC.mm10)
 library(GenomicRanges)
@@ -325,12 +372,37 @@ write.csv(cpg_to_gene, "cpg_to_gene_mapping_mm10.csv", row.names = FALSE)
 ```
 
 ```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("msigdb")
+```
+
+```{r}
+library(msigdb)
+library(ExperimentHub)
+library(GSEABase)
+```
+```{r}
+remove.packages("AnnotationHub")
+install.packages("BiocManager")
+BiocManager::install("AnnotationHub")
+```
+
+```{r}
+#retrieve hallmark mouse 
+msigdb.mm = getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
+hallmarks = subsetCollection(msigdb.mm, 'h')
+print(hallmarks)
+```
+
+```{r}
 # Run the methylglm function
 methylglm_results_pos <- methylglm(
     cpg.pval = cpg_pval,
     array.type = "custom",
     FullAnnot = FullAnnot,   # Ensure this is a properly formatted annotation data frame for CpGs
-    GS.type = "GO",            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
+    GS.type = "hallmarks",            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
     minsize = 200,
     maxsize = 500
 )

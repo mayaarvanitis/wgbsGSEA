@@ -406,6 +406,8 @@ methylglm_results_pos <- methylglm(
     minsize = 200,
     maxsize = 500
 )
+
+head(methylglm_results_pos)
 ```
 
 ```{r}

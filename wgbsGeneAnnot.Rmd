@@ -104,57 +104,114 @@ ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https:
 ```
 
 ```{r}
-#Gene annotation function -------------------------------------
-# Step 2: Modify the `annotate_genes` function to join with `cpg_id` after retrieving annotations
-annotate_genes <- function(data) {
-    # Retrieve gene annotations based on chromosomal regions
-    gene_annotations <- getBM(
-        attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
-        filters = "chromosomal_region",
-        values = paste0(data$chr, ":", data$start, "-", data$end),
-        mart = ensembl
-    )
-    # Rename columns to match `hyper_cpgs` column names for a successful join
-    gene_annotations <- gene_annotations %>%
-      rename(
-        chr = chromosome_name,
-        start = start_position,
-        end = end_position,
-        gene = external_gene_name
-      )
-    
-    # Step 3: Merge with `data` by matching `chr`, `start`, `end`
-    annotated_data <- merge(data, gene_annotations, by = c("chr", "start", "end"))
-    return(annotated_data)
-}
+#Taking a sample set of the cpgs for debugging / running time purposes
+# Step 2: Take a subset of each for testing
+set.seed(123)  # For reproducibility
+hyper_cpgs_subset <- hyper_cpgs %>% sample_n(1000)
+hypo_cpgs_subset <- hypo_cpgs %>% sample_n(1000)
 
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(chr = as.numeric(chr)) %>%  # Converts chromosome values to numeric, leaves NA for non-numeric
+  arrange(chr, start)  
+
+# Step 3: Check the subset data
+head(hyper_cpgs_subset)
+head(hypo_cpgs_subset)
+dim(hyper_cpgs_subset)
+dim(hypo_cpgs_subset)
+```
+```{r}
+# Load required libraries
+library(GenomicRanges)
+library(GenomicFeatures)
+library(AnnotationDbi)
 ```
 
 ```{r}
-# Step 1: Add CpG_ID to hyper_cpgs
-hyper_cpgs <- hyper_cpgs %>%
+# Remove columns we don't need
+hyper_cpgs_subset <- hyper_cpgs_subset[, c("chr", "start", "end", "pvalue")]
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
   mutate(cpg_id = paste0(chr, "_", start, "_", end))
 
-hypo_cpgs <- hypo_cpgs %>%
-  mutate(cpg_id = paste0(chr, "_", start, "_", end))
 
-head(hyper_cpgs)
-head(hypo_cpgs)
+# Display the result
+print(hyper_cpgs_subset)
 ```
 
 ```{r}
-#Function calls for both hyper/hypo methylated CpGs 
-hyper_genes <- annotate_genes(hyper_cpgs)
-hypo_genes <- annotate_genes(hypo_cpgs)
 
-head(hyper_genes)
-head(hypo_genes)
+# Construct chromosomal_region in the query dataset
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(query_id = paste0(chr, "_", start, "_", end),
+         chromosomal_region = paste0(chr, ":", start, "-", end))
+
+# Retrieve gene annotations for hypermethylated CpGs
+hyper_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "ensembl_gene_id"),
+  filters = "chromosomal_region",
+  values = hyper_cpgs_subset$chromosomal_region,
+  mart = ensembl
+)
+# Add chromosomal_region column to the result
+hyper_annotations <- hyper_annotations %>%
+  mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+
+# Display the first few rows
+head(hyper_annotations)
 ```
+```{r}
+# Assume hyper_cpgs_subset has a 'cpg_id' column with the format "chr_start_end"
+# Extract chr, start, and end from cpg_id
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Parse 'chromosomal_region' in hyper_annotations to chr, start, and end
+hyper_annotations <- hyper_annotations %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+  )
+
+# Convert CpG data to GRanges object
+cpg_gr <- GRanges(
+  seqnames = hyper_cpgs_subset$chr,
+  ranges = IRanges(start = hyper_cpgs_subset$start, end = hyper_cpgs_subset$end),
+  cpg_id = hyper_cpgs_subset$cpg_id
+)
+
+# Convert gene annotation data to GRanges object
+gene_gr <- GRanges(
+  seqnames = hyper_annotations$chr,
+  ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
+  ensembl_gene_id = hyper_annotations$ensembl_gene_id
+)
+
+# Find overlaps between CpG ranges and gene ranges
+overlaps <- findOverlaps(cpg_gr, gene_gr)
+
+# Map each CpG to all overlapping genes
+mapped_genes <- data.frame(
+  cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
+  ensembl_gene_id = mcols(gene_gr)$ensembl_gene_id[subjectHits(overlaps)]
+)
+
+# Optional: Merge mapped CpG-gene pairs with original annotations
+annotated_genes <- left_join(mapped_genes, hyper_annotations, by = "ensembl_gene_id")
+
+# Display the result
+head(annotated_genes)
+```
+
 
 ```{r}
 # Save the hyper_genes and hypo_genes objects as .rds files
-saveRDS(hyper_genes, file = "hyper_genes.rds")
-saveRDS(hypo_genes, file = "hypo_genes.rds")
+saveRDS(hyper_genes, file = "hyper_annotations.rds")
+saveRDS(hypo_genes, file = "hypo_annotations.rds")
 ```
 
 ```{r}
@@ -163,34 +220,6 @@ hyper_genes <- readRDS("rds/hyper_genes.rds")
 hypo_genes <- readRDS("rds/hypo_genes.rds")
 hyper_cpgs <- readRDS("rds/hyper_cpgs.rds")
 hypo_cpgs <- readRDS("rds/hyper_cpgs.rds")
-```
-
-
-
-Create CpG Ids:
-```{r}
-# Step 1: Create a unique identifier for each CpG site based on chr, start, and end
-hyper_cpgs <- hyper_cpgs %>%
-  mutate(cpg_id = paste0(chr, "_", start, "_", end))
-
-hyper_genes <- hyper_genes %>%
-  mutate(cpg_id = paste0(chr, "_", start, "_", end))
-
-# Step 2: Identify the common CpG IDs in both data frames
-common_cpg_ids <- intersect(hyper_cpgs$cpg_id, hyper_genes$cpg_id)
-
-# Step 3: Filter both data frames to keep only matching entries
-filtered_hyper_cpgs <- hyper_cpgs %>% filter(cpg_id %in% common_cpg_ids)
-filtered_hyper_genes <- hyper_genes %>% filter(cpg_id %in% common_cpg_ids)
-
-# Optional: Arrange by cpg_id to align rows for further analysis or merging
-filtered_hyper_cpgs <- filtered_hyper_cpgs %>% arrange(cpg_id)
-filtered_hyper_genes <- filtered_hyper_genes %>% arrange(cpg_id)
-
-# Check the filtered data frames
-head(filtered_hyper_cpgs)
-head(filtered_hyper_genes)
-
 ```
 
 ```{r}

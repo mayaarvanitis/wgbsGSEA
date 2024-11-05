@@ -214,20 +214,6 @@ print(head(mapped_genes))
 ```
 
 ```{r}
-# Save the hyper_genes and hypo_genes objects as .rds files
-saveRDS(hyper_genes, file = "hyper_annotations.rds")
-saveRDS(hypo_genes, file = "hypo_annotations.rds")
-```
-
-```{r}
-# Load the hyper_genes and hypo_genes objects from the .rds files
-hyper_genes <- readRDS("rds/hyper_genes.rds")
-hypo_genes <- readRDS("rds/hypo_genes.rds")
-hyper_cpgs <- readRDS("rds/hyper_cpgs.rds")
-hypo_cpgs <- readRDS("rds/hyper_cpgs.rds")
-```
-
-```{r}
 library(methylGSA)
 ```
 
@@ -241,41 +227,24 @@ head(cpg_pval)
 ```{r}
 # Check the column names in mapped_genes
 colnames(mapped_genes)
-# Ensure that `mapped_genes` has only the CpG and Gene columns
+
+# Ensure that `mapped_genes` has only the CpG and Ensembl gene ID columns
 mapped_genes_prepared <- mapped_genes[, c("cpg_id", "ensembl_gene_id")]
 
 # Rename columns to match the expected format for `prepareAnnot`
 colnames(mapped_genes_prepared) <- c("CpG", "Gene")
 
-# Remove duplicate CpG-Gene pairs to ensure unique CpG identifiers
-mapped_genes_prepared <- mapped_genes_prepared[!duplicated(mapped_genes_prepared$CpG), ]
-
 # Verify that there are no duplicates
 any(duplicated(mapped_genes_prepared$CpG))  # Should return FALSE
 
-# Retrieve gene symbols for each Ensembl gene ID
-gene_symbols <- getBM(
-    attributes = c("ensembl_gene_id", "mgi_symbol"),  # Using "mgi_symbol" for mouse gene symbols
-    filters = "ensembl_gene_id",
-    values = mapped_genes_prepared$Gene,
-    mart = ensembl
-)
+# Use the Ensembl IDs directly in FullAnnot
+FullAnnot2 <- mapped_genes_prepared[, c("CpG", "Gene")]
+colnames(FullAnnot2) <- c("cpg", "gene")  # Rename to expected format
 
-# Merge gene symbols back with the mapped CpG data
-mapped_genes_prepared <- merge(
-    mapped_genes_prepared,
-    gene_symbols,
-    by.x = "Gene",
-    by.y = "ensembl_gene_id",
-    all.x = TRUE
-)
+# Display a sample of FullAnnot to verify
+head(FullAnnot2)
 
-# Replace Ensembl IDs with gene symbols in FullAnnot
-FullAnnot <- mapped_genes_prepared[, c("CpG", "mgi_symbol")]
-colnames(FullAnnot) <- c("cpg", "gene")  # Rename to expected format
-head(FullAnnot)
 ```
-
 ```{r}
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
@@ -292,7 +261,7 @@ library(GSEABase)
 ```{r}
 #retrieve hallmark mouse 
 # Retrieve hallmark gene sets for mouse
-msigdb.mm = getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
+msigdb.mm <- getMsigdb(org = 'mm', id = 'ENSEMBL', version = '7.4')
 
 hallmarks = subsetCollection(msigdb.mm, 'h')
 ```
@@ -310,18 +279,49 @@ hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
 ```
 
 ```{r}
-library(methylGSA)
+print(class(cpg_pval))      # Should output "numeric"
+print(is.numeric(cpg_pval)) # Should return TRUE
 ```
+
+```{r}
+if (any(is.na(cpg_pval))) {
+    cpg_pval <- cpg_pval[!is.na(cpg_pval)] 
+}
+```
+
+```{r}
+if (length(cpg_pval) == 0) {
+    stop("cpg.pval is empty. Please ensure it contains valid p-values.")
+}
+```
+
+```{r}
+cpg_pval = na.omit(cpg_pval)
+FullAnnot <- na.omit(FullAnnot)
+
+```
+
+```{r}
+# Filter cpg_pval to keep only CpGs that are in FullAnnot
+valid_cpg_ids <- FullAnnot$cpg_id
+cpg_pval <- cpg_pval[names(cpg_pval) %in% valid_cpg_ids]
+
+# Ensure there are still CpGs left in cpg_pval after filtering
+if (length(cpg_pval) == 0) {
+    stop("cpg_pval is empty after filtering. Ensure there are matching CpGs between cpg_pval and FullAnnot.")
+}
+```
+
 
 ```{r}
 # Run the methylglm function
 methylglm_results_pos <- methylglm(
     cpg.pval = cpg_pval,
     array.type = "custom",
-    FullAnnot = FullAnnot,   # Ensure this is a properly formatted annotation data frame for CpGs
-    GS.type = hallmarks_list,            # Choose appropriate gene set type, e.g., "GO" for Gene Ontology
-    minsize = 200,
-    maxsize = 500
+    FullAnnot = FullAnnot2,
+    GS.list = hallmarks_list,          
+    minsize = 10,
+    maxsize = 700
 )
 
 head(methylglm_results_pos)

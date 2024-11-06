@@ -309,19 +309,57 @@ cpg_pval <- cpg_pval[names(cpg_pval) %in% valid_cpg_ids]
 Convert hallmarks_list to ENSEMBL IDs from ENTREZ IDs
 
 ```{r}
-# Convert Entrez IDs to Ensembl IDs
-conversion_table <- getBM(
-    attributes = c("entrezgene_id", "ensembl_gene_id"),  # Attributes to retrieve
-    filters = "entrezgene_id",                           # Filter on Entrez IDs
-    values = hallmarks_list$entrez_id,                   # Entrez IDs to convert
-    mart = ensembl                                       # The Biomart connection
-)
+convert_entrez_to_ensembl <- function(entrez_ids) {
+  # Retrieve Ensembl IDs for the given Entrez IDs
+  conversion <- getBM(
+    attributes = c("entrezgene_id", "ensembl_gene_id"),
+    filters = "entrezgene_id",
+    values = entrez_ids,
+    mart = ensembl
+  )
+  
+  # Rename columns for clarity
+  colnames(conversion) <- c("EntrezID", "EnsemblID")
+  
+  return(conversion)
+}
+# Convert each hallmark gene set from Entrez to Ensembl IDs
+hallmarks_list_ensembl <- lapply(hallmarks_list, function(entrez_ids) {
+  convert_entrez_to_ensembl(entrez_ids)
+})
 ```
 
 ```{r}
 head(FullAnnot2)
-head(hallmarks_list)
+head(hallmarks_list_ensembl)
 ```
+
+```{r}
+# Convert each hallmark entry to just a vector of Ensembl IDs
+hallmarks_list_for_methylglm <- lapply(hallmarks_list_ensembl, function(df) {
+  unique(df$EnsemblID)  # Extract and ensure unique Ensembl IDs for each hallmark
+})
+
+# Verify the structure of the list for methylglm
+str(hallmarks_list_for_methylglm)
+```
+```{r}
+# Extract only the EnsemblID column from each hallmark and convert to a list
+hallmarks_list_for_methylglm <- lapply(hallmarks_list_ensembl, function(df) {
+  unique(df$EnsemblID)  # Extract only the Ensembl IDs, ensuring uniqueness
+})
+
+# Check the structure of the list for methylglm
+str(hallmarks_list_for_methylglm)
+```
+
+Verify all structures:
+```{r}
+head(FullAnnot2)
+str(hallmarks_list_for_methylglm)
+cpg_pval
+```
+
 
 ```{r}
 # Run the methylglm function
@@ -329,9 +367,9 @@ methylglm_results_pos <- methylglm(
     cpg.pval = cpg_pval,
     array.type = "custom",
     FullAnnot = FullAnnot2,
-    GS.list = hallmarks_list,          
-    minsize = 10,
-    maxsize = 700
+    GS.list = hallmarks_list_for_methylglm,          
+    minsize = 2,
+    maxsize = 800
 )
 
 head(methylglm_results_pos)

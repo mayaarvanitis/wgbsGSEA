@@ -261,10 +261,10 @@ library(GSEABase)
 ```{r}
 #retrieve hallmark mouse 
 # Retrieve hallmark gene sets for mouse
-msigdb.mm <- getMsigdb(org = 'mm', id = 'ENSEMBL', version = '7.4')
-
+msigdb.mm <- getMsigdb(org = 'mm', id = 'EZID', version = '7.4')
 hallmarks = subsetCollection(msigdb.mm, 'h')
 ```
+
 
 ```{r}
 # Convert hallmarks to a list of gene symbols by hallmark name
@@ -297,21 +297,31 @@ if (length(cpg_pval) == 0) {
 
 ```{r}
 cpg_pval = na.omit(cpg_pval)
-FullAnnot <- na.omit(FullAnnot)
-
+FullAnnot2 <- na.omit(FullAnnot2)
 ```
 
 ```{r}
 # Filter cpg_pval to keep only CpGs that are in FullAnnot
-valid_cpg_ids <- FullAnnot$cpg_id
+valid_cpg_ids <- FullAnnot2$cpg_id
 cpg_pval <- cpg_pval[names(cpg_pval) %in% valid_cpg_ids]
-
-# Ensure there are still CpGs left in cpg_pval after filtering
-if (length(cpg_pval) == 0) {
-    stop("cpg_pval is empty after filtering. Ensure there are matching CpGs between cpg_pval and FullAnnot.")
-}
 ```
 
+Convert hallmarks_list to ENSEMBL IDs from ENTREZ IDs
+
+```{r}
+# Convert Entrez IDs to Ensembl IDs
+conversion_table <- getBM(
+    attributes = c("entrezgene_id", "ensembl_gene_id"),  # Attributes to retrieve
+    filters = "entrezgene_id",                           # Filter on Entrez IDs
+    values = hallmarks_list$entrez_id,                   # Entrez IDs to convert
+    mart = ensembl                                       # The Biomart connection
+)
+```
+
+```{r}
+head(FullAnnot2)
+head(hallmarks_list)
+```
 
 ```{r}
 # Run the methylglm function

@@ -1,0 +1,714 @@
+---
+title: "wgbsGeneAnnot"
+author: "Maya Arvanitis"
+date: "10/28/2024"
+output: html_document
+---
+
+---
+title: "wgbsGeneAnnot"
+author: "Maya Arvanitis"
+date: "10/28/2024"
+output: html_document
+---
+
+## Introduction
+
+Whole genome bisulfite sequencing (WGBS) is a powerful technique used to assess DNA methylation across the entire genome at single-base resolution. 
+
+Unlike array-based methods, which focus on a limited set of CpG sites, WGBS provides a comprehensive view of methylation patterns, offering the potential to uncover novel regulatory elements and regions associated with gene expression.
+
+However, a challenge with WGBS data is the lack of direct mapping between CpG sites and gene annotations, making it necessary to perform additional gene annotation steps to link methylation changes to specific genes and biological functions.
+
+## Purpose of Gene Annotation in WGBS Analysis
+
+The goal of gene annotation in WGBS analysis is to map CpG sites to their corresponding genes or regulatory regions, enabling functional interpretation of the observed methylation patterns. 
+
+Without this mapping, it would be difficult to understand the biological significance of differentially methylated regions (DMRs) or sites, limiting the ability to link epigenetic changes to gene expression and cellular functions. 
+
+Gene annotation allows researchers to perform downstream analyses such as gene set enrichment analysis, pathway analysis, and integration with other genomic data.
+
+## Methodology
+
+Gene annotation for WGBS involves linking CpG sites with nearby genes based on their genomic coordinates. This process can be challenging because WGBS data provides information on methylation at individual CpG sites scattered throughout the genome, rather than pre-defined CpG regions associated with genes. 
+
+The following steps will be used to perform gene annotation:
+
+1. **Mapping Genomic Coordinates to Genes:** 
+
+   The first step is to map the coordinates of the CpG sites (chromosome, start, and end positions) to nearby genes. This can be done using external gene annotation databases such as Ensembl or UCSC, which provide the genomic locations of genes and other functional elements. Tools like `biomaRt` or `annotatr` can facilitate this process by querying these databases for gene information based on the provided coordinates.
+
+2. **Annotating with Genomic Ranges:** 
+
+   In cases where CpG sites do not fall directly within gene bodies, it may be necessary to extend the search to include nearby regulatory regions (e.g., promoters or enhancers) by using a genomic range overlap approach. This involves defining a window around each CpG site and checking for overlaps with annotated gene regions using packages like `GenomicRanges`.
+
+3. **Validation and Cross-Referencing:** 
+
+   To ensure the accuracy of the annotation, multiple sources of gene annotations can be used to cross-reference the mapped genes. For instance, gene assignments from both `biomaRt` and `annotatr` can be compared, and only consistent annotations may be retained.
+
+4. **Handling Ambiguities:** 
+
+   In some cases, a CpG site may overlap with more than one gene or may be located in intergenic regions. In such cases, appropriate rules will be defined to assign the CpG site to the most relevant gene, or to mark it as intergenic if no clear assignment can be made.
+
+This gene annotation process is a crucial step in linking WGBS methylation data to biological functions, enabling a more meaningful interpretation of the epigenetic changes observed in the data.
+
+Note: In this file I will be working with a sample of the differential methylation data (N = 10 000) simply for running time / debugging purposes.
+
+```{r, results="hide", error = FALSE, message=FALSE, warning=FALSE}
+# Load necessary libraries
+library(biomaRt)
+library(annotatr)
+library(GenomicRanges)
+library(dplyr)
+library(readr)
+library(ggplot2)
+```
+
+```{r}
+# Read the data
+diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(diff_data))
+```
+
+We will filter the data to select for significant p-values first.
+```{r}
+significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
+```
+
+Now, we can separate this data into 2 groups: 
+1. p-values with positive changes (hypermethylation)
+2. p-values with negative changes (hypomethylation)
+
+```{r}
+hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
+hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+
+head(hyper_cpgs)
+head(hypo_cpgs)
+dim(hyper_cpgs)
+dim(hypo_cpgs)
+```
+
+Now we have two groups we are working with:
+1. `hyper_cpgs` : 629752
+2. `hypo_cpgs` : 755228
+
+We will now perform gene annotation using biomaRt.
+
+```{r}
+# Step 1: Mapping Genomic Coordinates to Genes using biomaRt
+# Connect to the Ensembl database for mouse genome annotation
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
+```
+
+```{r}
+#Taking a sample set of the cpgs for debugging / running time purposes
+# Step 2: Take a subset of each for testing
+set.seed(123)  # For reproducibility
+hyper_cpgs_subset <- hyper_cpgs %>% sample_n(1000)
+hypo_cpgs_subset <- hypo_cpgs %>% sample_n(1000)
+
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(chr = as.numeric(chr)) %>%  # Converts chromosome values to numeric, leaves NA for non-numeric
+  arrange(chr, start)  
+
+# Step 3: Check the subset data
+head(hyper_cpgs_subset)
+head(hypo_cpgs_subset)
+dim(hyper_cpgs_subset)
+dim(hypo_cpgs_subset)
+```
+```{r}
+# Load required libraries
+library(GenomicRanges)
+library(GenomicFeatures)
+library(AnnotationDbi)
+```
+
+```{r}
+# Remove columns we don't need
+hyper_cpgs_subset <- hyper_cpgs_subset[, c("chr", "start", "end", "pvalue")]
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+
+# Display the result
+print(hyper_cpgs_subset)
+```
+
+```{r}
+
+# Construct chromosomal_region in the query dataset
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(query_id = paste0(chr, "_", start, "_", end),
+         chromosomal_region = paste0(chr, ":", start, "-", end))
+
+# Retrieve gene annotations for hypermethylated CpGs
+hyper_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "ensembl_gene_id"),
+  filters = "chromosomal_region",
+  values = hyper_cpgs_subset$chromosomal_region,
+  mart = ensembl
+)
+# Add chromosomal_region column to the result
+hyper_annotations <- hyper_annotations %>%
+  mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+
+# Display the first few rows
+head(hyper_annotations)
+```
+```{r}
+library(dplyr)
+# Assume hyper_cpgs_subset has a 'cpg_id' column with the format "chr_start_end"
+
+hyper_cpgs_subset <- as.data.frame(hyper_cpgs_subset)
+# Extract chr, start, and end from cpg_id
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Parse 'chromosomal_region' in hyper_annotations to chr, start, and end
+hyper_annotations <- hyper_annotations %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+  )
+
+# Convert CpG data to GRanges object
+cpg_gr <- GRanges(
+  seqnames = hyper_cpgs_subset$chr,
+  ranges = IRanges(start = hyper_cpgs_subset$start, end = hyper_cpgs_subset$end),
+  cpg_id = hyper_cpgs_subset$cpg_id
+)
+
+# Convert gene annotation data to GRanges object
+gene_gr <- GRanges(
+  seqnames = hyper_annotations$chr,
+  ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
+  ensembl_gene_id = hyper_annotations$ensembl_gene_id
+)
+
+# Find overlaps between CpG ranges and gene ranges
+overlaps <- findOverlaps(cpg_gr, gene_gr)
+
+# Map each CpG to all overlapping genes
+mapped_genes <- data.frame(
+  cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
+  ensembl_gene_id = mcols(gene_gr)$ensembl_gene_id[subjectHits(overlaps)]
+)
+
+hyper_cpgs_subset <- as_tibble(hyper_cpgs_subset)
+
+mapped_genes <- mapped_genes %>%
+  left_join(hyper_cpgs_subset %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
+
+# Check the result
+print(head(mapped_genes))
+```
+
+```{r}
+library(methylGSA)
+```
+
+```{r}
+cpg_pval <- setNames(mapped_genes$pvalue, mapped_genes$cpg_id)
+head(cpg_pval)
+```
+
+
+
+```{r}
+# Check the column names in mapped_genes
+colnames(mapped_genes)
+
+# Ensure that `mapped_genes` has only the CpG and Ensembl gene ID columns
+mapped_genes_prepared <- mapped_genes[, c("cpg_id", "ensembl_gene_id", "pvalue")]
+
+# Rename columns to match the expected format for `prepareAnnot`
+colnames(mapped_genes_prepared) <- c("CpG", "Gene", "pvalue")
+
+# Verify that there are no duplicates
+any(duplicated(mapped_genes_prepared$CpG))  # Should return FALSE
+
+# Use the Ensembl IDs directly in FullAnnot
+FullAnnot2 <- mapped_genes_prepared[, c("CpG", "Gene", "pvalue")]
+colnames(FullAnnot2) <- c("cpg", "gene", "pvalue")  # Rename to expected format
+
+# Display a sample of FullAnnot to verify
+head(FullAnnot2)
+
+```
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("msigdb")
+```
+
+```{r}
+library(msigdb)
+library(ExperimentHub)
+library(GSEABase)
+```
+
+```{r}
+#retrieve hallmark mouse 
+# Retrieve hallmark gene sets for mouse
+msigdb.mm <- getMsigdb(org = 'mm', id = 'EZID', version = '7.4')
+hallmarks = subsetCollection(msigdb.mm, 'h')
+```
+
+
+```{r}
+# Convert hallmarks to a list of gene symbols by hallmark name
+hallmarks_list <- lapply(hallmarks, function(gs) {
+  # Extract gene symbols and set name for each GeneSet object
+  setNames(list(gs@geneIds), gs@setName)
+})
+
+# Flatten the list structure to obtain a single list with hallmark names as keys
+hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
+
+```
+
+```{r}
+print(class(cpg_pval))      # Should output "numeric"
+print(is.numeric(cpg_pval)) # Should return TRUE
+```
+
+```{r}
+if (any(is.na(cpg_pval))) {
+    cpg_pval <- cpg_pval[!is.na(cpg_pval)] 
+}
+```
+
+```{r}
+if (length(cpg_pval) == 0) {
+    stop("cpg.pval is empty. Please ensure it contains valid p-values.")
+}
+```
+
+```{r}
+cpg_pval = na.omit(cpg_pval)
+FullAnnot2 <- na.omit(FullAnnot2)
+```
+
+Convert hallmarks_list to ENSEMBL IDs from ENTREZ IDs
+
+```{r}
+convert_entrez_to_ensembl <- function(entrez_ids) {
+  # Retrieve Ensembl IDs for the given Entrez IDs
+  conversion <- getBM(
+    attributes = c("entrezgene_id", "ensembl_gene_id"),
+    filters = "entrezgene_id",
+    values = entrez_ids,
+    mart = ensembl
+  )
+  
+  # Rename columns for clarity
+  colnames(conversion) <- c("EntrezID", "EnsemblID")
+  
+  return(conversion)
+}
+# Convert each hallmark gene set from Entrez to Ensembl IDs
+hallmarks_list_ensembl <- lapply(hallmarks_list, function(entrez_ids) {
+  convert_entrez_to_ensembl(entrez_ids)
+})
+```
+
+```{r}
+head(FullAnnot2)
+head(hallmarks_list_ensembl)
+```
+
+```{r}
+# Convert each hallmark entry to just a vector of Ensembl IDs
+hallmarks_list_for_methylglm <- lapply(hallmarks_list_ensembl, function(df) {
+  unique(df$EnsemblID)  # Extract and ensure unique Ensembl IDs for each hallmark
+})
+
+# Verify the structure of the list for methylglm
+str(hallmarks_list_for_methylglm)
+```
+```{r}
+# Extract only the EnsemblID column from each hallmark and convert to a list
+hallmarks_list_for_methylglm <- lapply(hallmarks_list_ensembl, function(df) {
+  unique(df$EnsemblID)  # Extract only the Ensembl IDs, ensuring uniqueness
+})
+
+# Check the structure of the list for methylglm
+str(hallmarks_list_for_methylglm)
+```
+
+Verify all structures:
+```{r}
+head(FullAnnot2)
+str(hallmarks_list_for_methylglm)
+cpg_pval
+```
+
+
+```{r}                  
+# Run the methylglm function                  
+methylglm_results_pos <- methylglm(
+    cpg.pval = cpg_pval,
+    array.type = "custom",
+    FullAnnot = FullAnnot2,
+    GS.list = hallmarks_list_for_methylglm,          
+    minsize = 2,
+    maxsize = 800
+)
+
+head(methylglm_results_pos)
+```
+
+Attempting to fix `argument mu must be a nonempty numeric vector` error. 
+
+1. Validating `cpg_pval` and `FullAnnot2`
+```{r}
+# Check if cpg_pval is non-empty and numeric
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Check if FullAnnot2 is a data frame and has the necessary columns
+required_cols <- c("cpg", "gene", "pvalue")
+if (!is.data.frame(FullAnnot2) || !all(required_cols %in% colnames(FullAnnot2))) {
+  stop("Error: FullAnnot2 is not properly formatted or missing required columns.")
+}
+
+# Check for NAs in pvalue column
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Warning: FullAnnot2 contains NAs in the pvalue column. Removing these rows.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+```
+
+```{r}
+# Ensure GS.list has sufficient elements in each gene set
+minsize <- 2
+maxsize <- 800
+
+filtered_gs_list <- lapply(GS.list, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$ensembl_gene_id]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering for size.")
+}
+```
+
+```{r}
+library(methylGSA)
+
+# Function to run methylglm with error handling
+run_methylglm <- function() {
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Run the analysis
+results <- run_methylglm()
+
+# Check if results are NULL
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+}
+```
+
+```{r}
+# Extract the input data used for the GLM model within methylglm
+debug_glm_inputs <- function(cpg_pval, FullAnnot2) {
+  # Extract relevant columns from FullAnnot2
+  df <- FullAnnot2[, c("pvalue", "ensembl_gene_id")]
+  df$NegLogP <- -log10(df$pvalue)
+  df$probes <- cpg_pval
+  
+  # Ensure no NA values are present
+  df <- df[complete.cases(df), ]
+  
+  print(head(df))
+  
+  if (nrow(df) == 0) {
+    stop("Error: GLM input dataframe is empty.")
+  }
+  
+  return(df)
+}
+
+# Run the debugging function
+df <- debug_glm_inputs(cpg_pval, FullAnnot2)
+```
+
+```{r}
+# Step 1: Validate `cpg_pval` and `FullAnnot2`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+required_cols <- c("cpg", "gene", "pvalue")
+if (!is.data.frame(FullAnnot2) || !all(required_cols %in% colnames(FullAnnot2))) {
+  stop("Error: FullAnnot2 is not properly formatted or missing required columns.")
+}
+
+# Remove NAs in pvalue column
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Removing rows with NAs in the pvalue column.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+
+# Step 2: Validate and create `filtered_gs_list`
+minsize <- 2
+maxsize <- 800
+
+filtered_gs_list <- lapply(hallmarks_list_for_methylglm, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$gene]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove NULL entries
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+# Check if `filtered_gs_list` is properly created
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering.")
+} else {
+  message("Filtered gene sets: ", length(filtered_gs_list))
+}
+
+# Step 3: Run `methylglm` with error handling
+run_methylglm <- function() {
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Step 4: Run the analysis
+results <- run_methylglm()
+
+# Check if results are NULL
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+} else {
+  message("methylglm analysis completed successfully!")
+}
+
+# Print the results if successful
+if (!is.null(results)) {
+  print(head(results))
+}
+```
+```{r}
+# Step 1: Validate `cpg_pval`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Remove NAs from cpg_pval
+cpg_pval <- cpg_pval[!is.na(cpg_pval)]
+if (length(cpg_pval) == 0) {
+  stop("Error: After removing NAs, cpg_pval is empty.")
+}
+
+# Step 2: Check `FullAnnot2`
+required_cols <- c("cpg", "gene", "pvalue")
+actual_cols <- colnames(FullAnnot2)
+
+if (!all(required_cols %in% actual_cols)) {
+  stop(paste("Error: FullAnnot2 is missing required columns:", 
+             paste(setdiff(required_cols, actual_cols), collapse = ", ")))
+}
+
+# Check for NA values in FullAnnot2$pvalue
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Removing rows with NAs in the pvalue column.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+
+# Step 3: Print diagnostics for filtered_gs_list
+message("Filtered gene sets: ", length(hallmarks_list_for_methylglm))
+
+# Print a few entries from filtered_gs_list for inspection
+print(head(hallmarks_list_for_methylglm))
+
+# Step 4: Run `methylglm` with more debugging
+run_methylglm <- function() {
+  # Check lengths of input data
+  message("Length of cpg_pval: ", length(cpg_pval))
+  message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+  message("Number of filtered gene sets: ", length(filtered_gs_list))
+
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = hallmarks_list_for_methylglm,
+      
+```
+
+```{r}
+# Define the minimum and maximum size of gene sets
+minsize <- 2
+maxsize <- 800
+
+# Filter the gene sets to include only those with genes present in FullAnnot2
+filtered_gs_list <- lapply(hallmarks_list_for_methylglm, function(genes) {
+  # Keep only genes that are present in the FullAnnot2 dataset
+  genes <- genes[genes %in% FullAnnot2$ensembl_gene_id]
+  
+  # Only include gene sets with sizes within the specified range
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove any empty gene sets (NULL entries)
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+# Print the number of filtered gene sets
+message("Filtered gene sets: ", length(filtered_gs_list))
+```
+
+```{r}
+# Step 1: Validate `cpg_pval`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Remove NAs from cpg_pval
+cpg_pval <- cpg_pval[!is.na(cpg_pval)]
+if (length(cpg_pval) == 0) {
+  stop("Error: After removing NAs, cpg_pval is empty.")
+}
+
+message("Length of cpg_pval: ", length(cpg_pval))
+
+# Step 2: Check `FullAnnot2` format
+required_cols <- c("cpg", "gene", "pvalue")
+actual_cols <- colnames(FullAnnot2)
+
+if (!all(required_cols %in% actual_cols)) {
+  stop(paste("Error: FullAnnot2 is missing required columns:", 
+             paste(setdiff(required_cols, actual_cols), collapse = ", ")))
+}
+
+# Ensure FullAnnot2 has no NAs in the relevant columns
+FullAnnot2 <- FullAnnot2[complete.cases(FullAnnot2[, required_cols]), ]
+if (nrow(FullAnnot2) == 0) {
+  stop("Error: FullAnnot2 has no complete cases after removing NAs.")
+}
+
+message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+
+# Step 3: Check and filter `filtered_gs_list`
+filtered_gs_list <- lapply(filtered_gs_list, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$gene]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove NULL entries
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering.")
+}
+
+message("Filtered gene sets: ", length(filtered_gs_list))
+
+# Step 4: Define the function to run methylglm
+run_methylglm <- function() {
+  message("Running methylglm with inputs...")
+  message("Length of cpg_pval: ", length(cpg_pval))
+  message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+  message("Number of filtered gene sets: ", length(filtered_gs_list))
+  
+  # Debug: print first few entries of each input
+  print(head(cpg_pval))
+  print(head(FullAnnot2))
+  print(head(filtered_gs_list))
+  
+  # Run the analysis
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Step 5: Execute the function and check results
+results <- run_methylglm()
+
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+} else {
+  message("methylglm analysis completed successfully!")
+  print(head(results))
+}
+```
+
+```{r}
+# methylglm call for hypomethylated cpgs 
+methylglm_results_neg <- methylglm(
+    cpg.pval = setNames(hypo_cpgs$pvalue, hypo_cpgs$cpg_id),
+    array.type = "custom",
+    FullAnnot = hypo_genes,
+    GS.type = "GO",
+    minsize = 200,
+    maxsize = 500
+)
+```
+

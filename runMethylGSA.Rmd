@@ -1,0 +1,221 @@
+---
+title: "runMethylGSA"
+author: "Maya Arvanitis"
+date: "11/11/2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load required libraries
+library(GenomicRanges)
+library(GenomicFeatures)
+library(AnnotationDbi)
+library(msigdb)
+library(ExperimentHub)
+library(GSEABase)
+library(msigdbr)
+library(dplyr)
+library(tibble)
+library(methylGSA)
+library(org.Mm.eg.db)
+```
+
+```{r}
+# Read the data
+diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+
+# Inspect the data
+print(head(diff_data))
+```
+
+```{r}
+significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
+hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
+hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+
+#creating a subset for debugging purposes
+set.seed(123)
+hyper_cpgs_subset <- hyper_cpgs %>% sample_n(1000)
+# Remove columns we don't need
+hyper_cpgs_subset <- hyper_cpgs_subset[, c("chr", "start", "end", "pvalue")]
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
+# Display the result
+print(hyper_cpgs_subset)
+```
+
+```{r}
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
+```
+
+```{r}
+# Construct chromosomal_region in the query dataset
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(query_id = paste0(chr, "_", start, "_", end),
+         chromosomal_region = paste0(chr, ":", start, "-", end))
+
+# Retrieve gene annotations for each chromosome, start, and end position with gene symbols
+hyper_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = c("chromosome_name", "start", "end"),
+  values = list(hyper_cpgs_subset$chr, hyper_cpgs_subset$start, hyper_cpgs_subset$end),
+  mart = ensembl
+)
+
+# Add chromosomal_region column to the result
+hyper_annotations <- hyper_annotations %>%
+  mutate(chromosomal_region = paste0(chromosome_name, ":", start_position, "-", end_position))
+
+# Display the first few rows
+head(hyper_annotations)
+```
+```{r}
+# Ensure hyper_cpgs_subset is a data frame
+hyper_cpgs_subset <- as.data.frame(hyper_cpgs_subset)
+
+# Extract chr, start, and end from cpg_id
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Check for NAs and filter out any rows with missing start or end positions
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  filter(!is.na(chr) & !is.na(start) & !is.na(end))
+
+# Ensure hyper_annotations is correctly parsed as well
+hyper_annotations <- hyper_annotations %>%
+  mutate(
+    chr = sub("^(.*):.*-.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*:(.*)-.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*-([0-9]+)$", "\\1", chromosomal_region))
+  )
+
+# Check for NAs in hyper_annotations and filter out rows with missing start or end positions
+hyper_annotations <- hyper_annotations %>%
+  filter(!is.na(chr) & !is.na(start) & !is.na(end))
+
+# Convert filtered CpG data to GRanges object
+cpg_gr <- GRanges(
+  seqnames = hyper_cpgs_subset$chr,
+  ranges = IRanges(start = hyper_cpgs_subset$start, end = hyper_cpgs_subset$end),
+  cpg_id = hyper_cpgs_subset$cpg_id
+)
+
+# Convert filtered gene annotation data to GRanges object
+gene_gr <- GRanges(
+  seqnames = hyper_annotations$chr,
+  ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
+  external_gene_name = hyper_annotations$external_gene_name
+)
+
+# Display the GRanges objects
+head(cpg_gr)
+gene_gr
+```
+
+```{r}
+cpg_pval <- setNames(mapped_genes$pvalue, mapped_genes$cpg_id)
+head(cpg_pval)
+```
+
+
+```{r}
+# Prepare a vector of Ensembl IDs from your data
+ensembl_ids <- mapped_genes$ensembl_gene_id
+
+# Map Ensembl IDs to gene symbols using org.Mm.eg.db
+symbol_mapping <- AnnotationDbi::select(
+    org.Mm.eg.db,
+    keys = ensembl_ids,
+    columns = "SYMBOL",
+    keytype = "ENSEMBL"
+)
+
+# Merge the gene symbols back into the original data frame
+# This approach preserves the CpG_ID column without altering it
+mapped_genes_with_symbols <- merge(mapped_genes, symbol_mapping, 
+                                   by.x = "ensembl_gene_id", 
+                                   by.y = "ENSEMBL", 
+                                   all.x = TRUE)
+
+# Keep only the necessary columns and rename them for compatibility with prepareAnnot
+mapped_genes_prepared <- mapped_genes_with_symbols[, c("cpg_id", "SYMBOL", "pvalue")]
+colnames(mapped_genes_prepared) <- c("CpG_ID", "Gene_ID", "pvalue")  # Adjust column names
+
+# Display the updated data frame
+head(mapped_genes_prepared)
+```
+
+
+```{r}
+FullAnnot3 <- prepareAnnot(CpG2Gene, geneidtype = "SYMBOL")
+head(FullAnnot3)
+
+```
+
+```{r}
+# Retrieve hallmark gene sets for mouse with Ensembl IDs
+mouse_hallmarks <- msigdbr(species = "Mus musculus", category = "H")
+
+# Create a list of gene sets grouped by their hallmark set name
+hallmark_gene_sets <- mouse_hallmarks %>%
+    group_by(gs_name) %>%
+    summarise(ensembl_genes = list(ensembl_gene)) %>%
+    deframe()
+
+# Check the structure of the list
+str(hallmark_gene_sets)
+```
+```{r}
+# Remove empty gene sets from the list
+hallmark_gene_sets <- hallmark_gene_sets[lengths(hallmark_gene_sets) > 0]
+```
+
+```{r}
+# Connect to Ensembl database for mouse genes
+mouse_mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+# Retrieve a list of valid Ensembl gene IDs for Mus musculus
+valid_mouse_genes <- getBM(attributes = c("ensembl_gene_id"), mart = mouse_mart)
+
+# Check if IDs in FullAnnot and hallmark_gene_sets are valid
+valid_gene_ids <- valid_mouse_genes$ensembl_gene_id
+
+# Filter FullAnnot to only include valid Ensembl IDs
+FullAnnot <- FullAnnot[FullAnnot$ensembl_gene_id %in% valid_gene_ids, ]
+
+# Filter hallmark_gene_sets to include only valid Ensembl IDs
+hallmark_gene_sets <- lapply(hallmark_gene_sets, function(gene_set) {
+    intersect(gene_set, valid_gene_ids)
+})
+hallmark_gene_sets <- hallmark_gene_sets[lengths(hallmark_gene_sets) > 0]
+
+# Check the structure of filtered hallmark_gene_sets
+str(hallmark_gene_sets)
+```
+
+```{r}
+# Run methylglm with custom settings
+methylglm_results <- methylglm(
+    cpg.pval = cpg_pval,              # Named vector of CpG p-values
+    array.type = "custom",             # Custom array type
+    FullAnnot = FullAnnot,             # Data frame with CpG and gene annotations
+    group = "all",                     # Consider all CpGs
+    GS.list = hallmark_gene_sets,      # List of hallmark gene sets
+    GS.idtype = "ENSEMBL",             # Ensembl gene IDs in hallmark gene sets
+    GS.type = "GO",                    # Type of gene sets; specify if needed
+    minsize = 2,                       # Minimum gene set size
+    maxsize = 800,                     # Maximum gene set size
+    parallel = FALSE                   # Parallel processing (adjust as needed)
+)
+
+# Print the results
+print(methylglm_results)
+```

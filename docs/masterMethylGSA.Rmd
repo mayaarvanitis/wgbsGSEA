@@ -34,7 +34,9 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
     install.packages("BiocManager")
 }
 BiocManager::install(c("methylGSA", "biomaRt", "GenomicRanges", "annotatr"))
+```
 
+```{r}
 # Load necessary libraries
 library(GenomicRanges)
 library(GenomicFeatures)
@@ -66,6 +68,16 @@ significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
 # Separate CpGs into hypermethylated and hypomethylated groups
 hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
 hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+
+# Remove columns we don't need
+hyper_cpgs <- hyper_cpgs[, c("chr", "start", "end", "pvalue")]
+hyper_cpgs <- hyper_cpgs %>% mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+hypo_cpgs <- hypo_cpgs[, c("chr", "start", "end", "pvalue")]
+hypo_cpgs <- hypo_cpgs %>% mutate(cpg_id = paste0(chr, "_", start, "_", end))
+
+head(hypo_cpgs)
+head(hyper_cpgs)
 
 # Display the dimensions of the two groups
 cat("Number of hypermethylated CpGs:", nrow(hyper_cpgs), "\n")
@@ -124,7 +136,7 @@ head(hypo_annotations)
 
 ```{r}
 # Data preparation for methylGSA =============================
-hyper_cpgs <- as.data.frame(hyper_cpg)
+hyper_cpgs <- as.data.frame(hyper_cpgs)
 hypo_cpgs <- as.data.frame(hypo_cpgs)
 
 # Extract chr, start, and end from cpg_id

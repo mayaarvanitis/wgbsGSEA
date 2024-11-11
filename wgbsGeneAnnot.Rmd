@@ -205,7 +205,6 @@ mapped_genes <- data.frame(
 
 hyper_cpgs_subset <- as_tibble(hyper_cpgs_subset)
 
-# Now, retry the join operation with dplyr::select
 mapped_genes <- mapped_genes %>%
   left_join(hyper_cpgs_subset %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
 
@@ -229,17 +228,17 @@ head(cpg_pval)
 colnames(mapped_genes)
 
 # Ensure that `mapped_genes` has only the CpG and Ensembl gene ID columns
-mapped_genes_prepared <- mapped_genes[, c("cpg_id", "ensembl_gene_id")]
+mapped_genes_prepared <- mapped_genes[, c("cpg_id", "ensembl_gene_id", "pvalue")]
 
 # Rename columns to match the expected format for `prepareAnnot`
-colnames(mapped_genes_prepared) <- c("CpG", "Gene")
+colnames(mapped_genes_prepared) <- c("CpG", "Gene", "pvalue")
 
 # Verify that there are no duplicates
 any(duplicated(mapped_genes_prepared$CpG))  # Should return FALSE
 
 # Use the Ensembl IDs directly in FullAnnot
-FullAnnot2 <- mapped_genes_prepared[, c("CpG", "Gene")]
-colnames(FullAnnot2) <- c("cpg", "gene")  # Rename to expected format
+FullAnnot2 <- mapped_genes_prepared[, c("CpG", "Gene", "pvalue")]
+colnames(FullAnnot2) <- c("cpg", "gene", "pvalue")  # Rename to expected format
 
 # Display a sample of FullAnnot to verify
 head(FullAnnot2)
@@ -300,12 +299,6 @@ cpg_pval = na.omit(cpg_pval)
 FullAnnot2 <- na.omit(FullAnnot2)
 ```
 
-```{r}
-# Filter cpg_pval to keep only CpGs that are in FullAnnot
-valid_cpg_ids <- FullAnnot2$cpg_id
-cpg_pval <- cpg_pval[names(cpg_pval) %in% valid_cpg_ids]
-```
-
 Convert hallmarks_list to ENSEMBL IDs from ENTREZ IDs
 
 ```{r}
@@ -361,8 +354,8 @@ cpg_pval
 ```
 
 
-```{r}
-# Run the methylglm function
+```{r}                  
+# Run the methylglm function                  
 methylglm_results_pos <- methylglm(
     cpg.pval = cpg_pval,
     array.type = "custom",
@@ -373,6 +366,338 @@ methylglm_results_pos <- methylglm(
 )
 
 head(methylglm_results_pos)
+```
+
+Attempting to fix `argument mu must be a nonempty numeric vector` error. 
+
+1. Validating `cpg_pval` and `FullAnnot2`
+```{r}
+# Check if cpg_pval is non-empty and numeric
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Check if FullAnnot2 is a data frame and has the necessary columns
+required_cols <- c("cpg", "gene", "pvalue")
+if (!is.data.frame(FullAnnot2) || !all(required_cols %in% colnames(FullAnnot2))) {
+  stop("Error: FullAnnot2 is not properly formatted or missing required columns.")
+}
+
+# Check for NAs in pvalue column
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Warning: FullAnnot2 contains NAs in the pvalue column. Removing these rows.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+```
+
+```{r}
+# Ensure GS.list has sufficient elements in each gene set
+minsize <- 2
+maxsize <- 800
+
+filtered_gs_list <- lapply(GS.list, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$ensembl_gene_id]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering for size.")
+}
+```
+
+```{r}
+library(methylGSA)
+
+# Function to run methylglm with error handling
+run_methylglm <- function() {
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Run the analysis
+results <- run_methylglm()
+
+# Check if results are NULL
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+}
+```
+
+```{r}
+# Extract the input data used for the GLM model within methylglm
+debug_glm_inputs <- function(cpg_pval, FullAnnot2) {
+  # Extract relevant columns from FullAnnot2
+  df <- FullAnnot2[, c("pvalue", "ensembl_gene_id")]
+  df$NegLogP <- -log10(df$pvalue)
+  df$probes <- cpg_pval
+  
+  # Ensure no NA values are present
+  df <- df[complete.cases(df), ]
+  
+  print(head(df))
+  
+  if (nrow(df) == 0) {
+    stop("Error: GLM input dataframe is empty.")
+  }
+  
+  return(df)
+}
+
+# Run the debugging function
+df <- debug_glm_inputs(cpg_pval, FullAnnot2)
+```
+
+```{r}
+# Step 1: Validate `cpg_pval` and `FullAnnot2`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+required_cols <- c("cpg", "gene", "pvalue")
+if (!is.data.frame(FullAnnot2) || !all(required_cols %in% colnames(FullAnnot2))) {
+  stop("Error: FullAnnot2 is not properly formatted or missing required columns.")
+}
+
+# Remove NAs in pvalue column
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Removing rows with NAs in the pvalue column.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+
+# Step 2: Validate and create `filtered_gs_list`
+minsize <- 2
+maxsize <- 800
+
+filtered_gs_list <- lapply(hallmarks_list_for_methylglm, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$gene]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove NULL entries
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+# Check if `filtered_gs_list` is properly created
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering.")
+} else {
+  message("Filtered gene sets: ", length(filtered_gs_list))
+}
+
+# Step 3: Run `methylglm` with error handling
+run_methylglm <- function() {
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Step 4: Run the analysis
+results <- run_methylglm()
+
+# Check if results are NULL
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+} else {
+  message("methylglm analysis completed successfully!")
+}
+
+# Print the results if successful
+if (!is.null(results)) {
+  print(head(results))
+}
+```
+```{r}
+# Step 1: Validate `cpg_pval`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Remove NAs from cpg_pval
+cpg_pval <- cpg_pval[!is.na(cpg_pval)]
+if (length(cpg_pval) == 0) {
+  stop("Error: After removing NAs, cpg_pval is empty.")
+}
+
+# Step 2: Check `FullAnnot2`
+required_cols <- c("cpg", "gene", "pvalue")
+actual_cols <- colnames(FullAnnot2)
+
+if (!all(required_cols %in% actual_cols)) {
+  stop(paste("Error: FullAnnot2 is missing required columns:", 
+             paste(setdiff(required_cols, actual_cols), collapse = ", ")))
+}
+
+# Check for NA values in FullAnnot2$pvalue
+if (any(is.na(FullAnnot2$pvalue))) {
+  warning("Removing rows with NAs in the pvalue column.")
+  FullAnnot2 <- FullAnnot2[!is.na(FullAnnot2$pvalue), ]
+}
+
+# Step 3: Print diagnostics for filtered_gs_list
+message("Filtered gene sets: ", length(hallmarks_list_for_methylglm))
+
+# Print a few entries from filtered_gs_list for inspection
+print(head(hallmarks_list_for_methylglm))
+
+# Step 4: Run `methylglm` with more debugging
+run_methylglm <- function() {
+  # Check lengths of input data
+  message("Length of cpg_pval: ", length(cpg_pval))
+  message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+  message("Number of filtered gene sets: ", length(filtered_gs_list))
+
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = hallmarks_list_for_methylglm,
+      
+```
+
+```{r}
+# Define the minimum and maximum size of gene sets
+minsize <- 2
+maxsize <- 800
+
+# Filter the gene sets to include only those with genes present in FullAnnot2
+filtered_gs_list <- lapply(hallmarks_list_for_methylglm, function(genes) {
+  # Keep only genes that are present in the FullAnnot2 dataset
+  genes <- genes[genes %in% FullAnnot2$ensembl_gene_id]
+  
+  # Only include gene sets with sizes within the specified range
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove any empty gene sets (NULL entries)
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+
+# Print the number of filtered gene sets
+message("Filtered gene sets: ", length(filtered_gs_list))
+```
+
+```{r}
+# Step 1: Validate `cpg_pval`
+if (is.null(cpg_pval) || !is.numeric(cpg_pval) || length(cpg_pval) == 0) {
+  stop("Error: cpg_pval is empty or not numeric.")
+}
+
+# Remove NAs from cpg_pval
+cpg_pval <- cpg_pval[!is.na(cpg_pval)]
+if (length(cpg_pval) == 0) {
+  stop("Error: After removing NAs, cpg_pval is empty.")
+}
+
+message("Length of cpg_pval: ", length(cpg_pval))
+
+# Step 2: Check `FullAnnot2` format
+required_cols <- c("cpg", "gene", "pvalue")
+actual_cols <- colnames(FullAnnot2)
+
+if (!all(required_cols %in% actual_cols)) {
+  stop(paste("Error: FullAnnot2 is missing required columns:", 
+             paste(setdiff(required_cols, actual_cols), collapse = ", ")))
+}
+
+# Ensure FullAnnot2 has no NAs in the relevant columns
+FullAnnot2 <- FullAnnot2[complete.cases(FullAnnot2[, required_cols]), ]
+if (nrow(FullAnnot2) == 0) {
+  stop("Error: FullAnnot2 has no complete cases after removing NAs.")
+}
+
+message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+
+# Step 3: Check and filter `filtered_gs_list`
+filtered_gs_list <- lapply(filtered_gs_list, function(genes) {
+  genes <- genes[genes %in% FullAnnot2$gene]
+  if (length(genes) >= minsize && length(genes) <= maxsize) {
+    return(genes)
+  } else {
+    return(NULL)
+  }
+})
+
+# Remove NULL entries
+filtered_gs_list <- filtered_gs_list[!sapply(filtered_gs_list, is.null)]
+if (length(filtered_gs_list) == 0) {
+  stop("Error: No valid gene sets found after filtering.")
+}
+
+message("Filtered gene sets: ", length(filtered_gs_list))
+
+# Step 4: Define the function to run methylglm
+run_methylglm <- function() {
+  message("Running methylglm with inputs...")
+  message("Length of cpg_pval: ", length(cpg_pval))
+  message("Number of rows in FullAnnot2: ", nrow(FullAnnot2))
+  message("Number of filtered gene sets: ", length(filtered_gs_list))
+  
+  # Debug: print first few entries of each input
+  print(head(cpg_pval))
+  print(head(FullAnnot2))
+  print(head(filtered_gs_list))
+  
+  # Run the analysis
+  tryCatch({
+    results <- methylglm(
+      cpg.pval = cpg_pval,
+      array.type = "custom",
+      FullAnnot = FullAnnot2,
+      GS.list = filtered_gs_list,
+      minsize = minsize,
+      maxsize = maxsize
+    )
+    return(results)
+  }, error = function(e) {
+    message("Error in methylglm: ", e$message)
+    return(NULL)
+  })
+}
+
+# Step 5: Execute the function and check results
+results <- run_methylglm()
+
+if (is.null(results)) {
+  stop("methylglm analysis failed.")
+} else {
+  message("methylglm analysis completed successfully!")
+  print(head(results))
+}
 ```
 
 ```{r}

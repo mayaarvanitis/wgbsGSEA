@@ -1,0 +1,345 @@
+---
+title: "Complete Analysis of WGBS Data Using methylGSA"
+author: "Maya Arvanitis"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+    toc_float: true
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Whole genome bisulfite sequencing (WGBS) is a powerful technique that provides single-base resolution of DNA methylation across the entire genome. This allows researchers to investigate methylation changes in a comprehensive manner, uncovering patterns that may influence gene expression and contribute to diseases such as cancer.
+
+The purpose of this analysis is to:
+1. **Annotate differentially methylated CpG sites** with their corresponding genes.
+2. **Perform gene set enrichment analysis (GSEA)** using `methylGSA` to identify pathways and biological processes associated with methylation changes.
+3. **Compare enrichment results** using both logistic regression (methylglm) and the GSEA method (methylRRA).
+
+---
+
+# Step 1: Install and Load Necessary Libraries
+
+First, we need to install and load the required R packages. This ensures that all the functions we use throughout the analysis are available.
+
+```{r, warning=FALSE, message=FALSE}
+# Install packages if not already installed
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+BiocManager::install(c("methylGSA", "biomaRt", "GenomicRanges", "annotatr"))
+
+# Load necessary libraries
+library(GenomicRanges)
+library(GenomicFeatures)
+library(AnnotationDbi)
+library(msigdb)
+library(ExperimentHub)
+library(GSEABase)
+library(msigdbr)
+library(dplyr)
+library(tibble)
+library(methylGSA)
+library(org.Mm.eg.db)
+```
+
+# Data import and Preprocessing 
+In this step, we import the WGBS data containing information on CpG sites and their differential methylation status. We filter CpG sites based on their p-values to identify those that show significant methylation changes.
+
+```{r}
+# Load the full differential methylation data 
+diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+
+# Display the structure of the dataset
+head(diff_data)
+summary(diff_data)
+
+# Filter significant CpGs with p-value < 0.05
+significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
+
+# Separate CpGs into hypermethylated and hypomethylated groups
+hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
+hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+
+# Display the dimensions of the two groups
+cat("Number of hypermethylated CpGs:", nrow(hyper_cpgs), "\n")
+cat("Number of hypomethylated CpGs:", nrow(hypo_cpgs), "\n")
+```
+
+# Gene Annotation Using biomaRt
+
+This step involves annotating the significant CpGs with gene information using the biomaRt package, which allows us to query the Ensembl database.
+
+```{r}
+# Connect to the Ensembl database for mouse genome annotation
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
+```
+
+Perform these steps for both the hypermethylated and hypomethylated CpGs. 
+```{r}
+# STEP 1: Construct chromosomal_region in the query dataset ==============================
+# For hypermethylated CpGs -------
+hyper_cpgs <- hyper_cpgs %>% mutate(query_id = paste0(chr, "_", start, "_", end), chromosomal_region = paste0(chr, ":", start, "-", end))
+# For hypomethylated CpGs -------
+hypo_cpgs <- hypo_cpgs %>% mutate(query_id = paste0(chr, "_", start, "_", end), chromosomal_region = paste0(chr, ":", start, "-", end))
+
+# STEP 2: Annotate the CpG sites  ==============================
+# For hypermethylated CpGs -------
+hyper_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = "chromosomal_region",
+  values = hyper_cpgs$chromosomal_region,
+  mart = ensembl
+)
+# For hypomethylated CpGs -------
+hypo_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = "chromosomal_region",
+  values = hypo_cpgs$chromosomal_region,
+  mart = ensembl
+)
+
+# STEP 3: Add chromosomal_region column to the result ==============================
+# For hypermethylated CpGs -------
+hyper_annotations <- hyper_annotations %>% mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+# For hypomethylated CpGs -------
+hypo_annotations <- hypo_annotations %>% mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+
+# STEP 4: Filter out rows with NA in the external_gene_name column ==============================
+# For hypermethylated CpGs -------
+hyper_annotations <- hyper_annotations %>% filter(!is.na(external_gene_name) & external_gene_name != "" & !grepl("^\\s*$", external_gene_name))
+# For hypomethylated CpGs -------
+hypo_annotations <- hypo_annotations %>% filter(!is.na(external_gene_name) & external_gene_name != "" & !grepl("^\\s*$", external_gene_name))
+
+# STEP 5: Display the first few rows to confirm
+head(hyper_annotations)
+head(hypo_annotations)
+```
+
+```{r}
+# Data preparation for methylGSA =============================
+hyper_cpgs <- as.data.frame(hyper_cpg)
+hypo_cpgs <- as.data.frame(hypo_cpgs)
+
+# Extract chr, start, and end from cpg_id
+hyper_cpgs <- hyper_cpgs %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+hypo_cpgs <- hypo_cpgs %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Parse 'chromosomal_region' in hyper_annotations to chr, start, and end
+hyper_annotations <- hyper_annotations %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+  )
+hypo_annotations <- hypo_annotations %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+  )
+
+# Convert CpG data to GRanges object
+cpg_gr_hyper <- GRanges(
+  seqnames = hyper_cpgs$chr,
+  ranges = IRanges(start = hyper_cpgs$start, end = hyper_cpgs$end),
+  cpg_id = hyper_cpgs$cpg_id
+)
+
+cpg_gr_hypo <- GRanges(
+  seqnames = hypo_cpgs$chr,
+  ranges = IRanges(start = hypo_cpgs$start, end = hypo_cpgs$end),
+  cpg_id = hypo_cpgs$cpg_id
+)
+
+# Convert gene annotation data to GRanges object
+gene_gr_hyper <- GRanges(
+  seqnames = hyper_annotations$chr,
+  ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
+  external_gene_name = hyper_annotations$external_gene_name
+)
+
+gene_gr_hypo <- GRanges(
+  seqnames = hypo_annotations$chr,
+  ranges = IRanges(start = hypo_annotations$start, end = hypo_annotations$end),
+  external_gene_name = hypo_annotations$external_gene_name
+)
+
+# Find overlaps between CpG ranges and gene ranges
+overlaps_hyper <- findOverlaps(cpg_gr_hyper, gene_gr_hyper)
+overlaps_hypo <- findOverlaps(cpg_gr_hypo, gene_gr_hypo)
+
+# Map each CpG to all overlapping genes
+mapped_genes_hyper <- data.frame(
+  cpg_id = mcols(cpg_gr_hyper)$cpg_id[queryHits(overlaps)],
+  external_gene_name = mcols(gene_gr_hyper)$external_gene_name[subjectHits(overlaps)]
+)
+
+mapped_genes_hypo <- data.frame(
+  cpg_id = mcols(cpg_gr_hypo)$cpg_id[queryHits(overlaps)],
+  external_gene_name = mcols(gene_gr_hypo)$external_gene_name[subjectHits(overlaps)]
+)
+
+hyper_cpgs <- as_tibble(hyper_cpgs)
+hypo_cpgs <- as_tibble(hypo_cpgs)
+
+mapped_genes_hyper <- mapped_genes_hyper %>%
+  left_join(hyper_cpgs %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
+
+mapped_genes_hypo <- mapped_genes_hypo %>%
+  left_join(hypo_cpgs %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
+
+# Check the result
+print(head(mapped_genes_hyper))
+print(head(mapped_genes_hypo))
+```
+
+```{r}
+cpg_pval_hyper <- setNames(mapped_genes_hyper$pvalue, mapped_genes_hyper$cpg_id)
+cpg_pval_hypo <- setNames(mapped_genes_hypo$pvalue, mapped_genes_hypo$cpg_id)
+
+head(cpg_pval_hyper)
+head(cpg_pval_hypo)
+```
+
+```{r}
+# Remove duplicate rows based on cpg_id, keeping the first occurrence
+# Use dplyr::select to avoid namespace conflicts
+CpG2Gene_hyper <- mapped_genes_hyper %>%
+  dplyr::select(cpg_id, external_gene_name) %>%
+  distinct(cpg_id, .keep_all = TRUE)
+
+CpG2Gene_hypo <- mapped_genes_hypo %>%
+  dplyr::select(cpg_id, external_gene_name) %>%
+  distinct(cpg_id, .keep_all = TRUE)
+
+# Prepare the annotation with unique CpG to gene mappings
+FullAnnotHyper <- prepareAnnot(CpG2Gene_hyper, geneidtype = "SYMBOL")
+FullAnnotHypo <- prepareAnnot(CpG2Gene_hypo, geneidtype = "SYMBOL")
+
+# Display the first few rows
+head(FullAnnotHyper)
+head(FullAnnotHypo)
+```
+
+```{r}
+# Retrieve hallmark gene sets for mouse with Ensembl IDs
+msigdb.mm <- getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
+hallmarks = subsetCollection(msigdb.mm, 'h')
+
+# Convert hallmarks to a list of gene symbols by hallmark name
+hallmarks_list <- lapply(hallmarks, function(gs) {
+  # Extract gene symbols and set name for each GeneSet object
+  setNames(list(gs@geneIds), gs@setName)
+})
+
+# Flatten the list structure to obtain a single list with hallmark names as keys
+hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
+```
+
+```{r}
+# Run methylglm with custom settings
+methylglm_hypermethylated <- methylglm(
+    cpg.pval = cpg_pval_hyper,              # Named vector of CpG p-values
+    array.type = "custom",             # Custom array type
+    FullAnnot = FullAnnotHyper,             # Data frame with CpG and gene annotations
+    group = "all",                     # Consider all CpGs
+    GS.list = hallmarks_list,      # List of hallmark gene sets
+    GS.idtype = "SYM",             # Ensembl gene IDs in hallmark gene sets
+    GS.type = "GO",                    # Type of gene sets; specify if needed
+    minsize = 2,                       # Minimum gene set size
+    maxsize = 800,                     # Maximum gene set size
+    parallel = FALSE                   # Parallel processing (adjust as needed)
+)
+
+# Print the results
+head(methylglm_hypermethylated, 50)
+```
+
+```{r}
+# Run methylglm with custom settings
+methylglm_hypomethylated <- methylglm(
+    cpg.pval = cpg_pval_hypo,              # Named vector of CpG p-values
+    array.type = "custom",             # Custom array type
+    FullAnnot = FullAnnotHypo,             # Data frame with CpG and gene annotations
+    group = "all",                     # Consider all CpGs
+    GS.list = hallmarks_list,      # List of hallmark gene sets
+    GS.idtype = "SYM",             # Ensembl gene IDs in hallmark gene sets
+    GS.type = "GO",                    # Type of gene sets; specify if needed
+    minsize = 2,                       # Minimum gene set size
+    maxsize = 800,                     # Maximum gene set size
+    parallel = FALSE                   # Parallel processing (adjust as needed)
+)
+
+# Print the results
+head(methylglm_hypomethylated, 50)
+```
+
+ORA approach: 
+```{r}
+res_ORA_hypermethylated = methylRRA(
+  cpg.pval = cpg_pval_hyper,     
+  method = "ORA",           
+  FullAnnot = FullAnnotHyper,   
+  GS.list = hallmarks_list,           
+  GS.idtype = "SYMBOL",       
+  minsize = 2,              
+  maxsize = 800            
+)
+
+res_ORA_hypomethylated = methylRRA(
+  cpg.pval = cpg_pval_hypo,     
+  method = "ORA",           
+  FullAnnot = FullAnnotHypo,   
+  GS.list = hallmarks_list,           
+  GS.idtype = "SYMBOL",       
+  minsize = 2,              
+  maxsize = 800            
+)
+
+# Display the top 15 results from the ORA analysis
+head(res_ORA_hypermethylated, 15)
+# Display the top 15 results from the ORA analysis
+head(res_ORA_hypomethylated, 15)
+```
+
+
+```{r}
+res_GSEA_hyper <- methylRRA(
+  cpg.pval = cpg_pval_hyper,         
+  method = "GSEA",            
+  FullAnnot = FullAnnotHyper,       
+  GS.list = hallmarks_list,          
+  GS.idtype = "SYMBOL",        
+  minsize = 2,              
+  maxsize = 800               
+)
+res_GSEA_hypo <- methylRRA(
+  cpg.pval = cpg_pval_hypo,         
+  method = "GSEA",            
+  FullAnnot = FullAnnotHypo,       
+  GS.list = hallmarks_list,          
+  GS.idtype = "SYMBOL",        
+  minsize = 2,              
+  maxsize = 800               
+)
+# Display the top 10 results from the GSEA analysis
+head(res_GSEA_hyoer, 15)
+head(res_GSEA_hypo, 15)
+```

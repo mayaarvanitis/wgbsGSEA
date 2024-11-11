@@ -162,7 +162,6 @@ hallmarks_list <- lapply(hallmarks, function(gs) {
 
 # Flatten the list structure to obtain a single list with hallmark names as keys
 hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
-
 ```
 
 
@@ -182,5 +181,35 @@ methylglm_results <- methylglm(
 )
 
 # Print the results
-print(methylglm_results)
+head(methylglm_results, 50)
+```
+
+ORA approach: 
+```{r}
+res_ORA = methylRRA(
+  cpg.pval = cpg_pval,     
+  method = "ORA",           
+  FullAnnot = FullAnnot3,   
+  GS.list = hallmarks_list,           
+  GS.idtype = "SYMBOL",       
+  minsize = 2,              
+  maxsize = 800            
+)
+
+# Display the top 15 results from the ORA analysis
+head(res_ORA, 15)
+```
+```{r}
+res_GSEA <- methylRRA(
+  cpg.pval = cpg_pval,         
+  method = "GSEA",            
+  FullAnnot = FullAnnot3,       
+  GS.list = hallmarks_list,          
+  GS.idtype = "SYMBOL",        
+  minsize = 2,              
+  maxsize = 800               
+)
+
+# Display the top 10 results from the GSEA analysis
+head(res_GSEA, 15)
 ```

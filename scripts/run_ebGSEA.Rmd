@@ -28,54 +28,9 @@ library(readr)
 library(ggplot2)
 library(dplyr)
 ```
-
-```{r}
-# Load the full differential methylation data
-diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
-
-# Filter for significant CpGs (p-value < 0.05)
-significant_cpgs <- diff_data %>% filter(pvalue < 0.05)
-
-# Separate into hypermethylated and hypomethylated CpGs
-hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
-hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
-
-cat("Number of hypermethylated CpGs:", nrow(hyper_cpgs), "\n")
-cat("Number of hypomethylated CpGs:", nrow(hypo_cpgs), "\n")
-```
-
-```{r}
-#creating a subset for debugging purposes
-set.seed(123)
-hyper_cpgs_subset <- hyper_cpgs %>% sample_n(1000)
-# Remove columns we don't need
-hyper_cpgs_subset <- hyper_cpgs_subset[, c("chr", "start", "end", "pvalue")]
-hyper_cpgs_subset <- hyper_cpgs_subset %>%
-  mutate(cpg_id = paste0(chr, "_", start, "_", end))
-# Display the result
-print(hyper_cpgs_subset)
-```   
-
 ```{r}
 # Connect to Ensembl for mouse genome annotation
 ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
-```
-
-```{r}
-# Annotate CpG sites with gene names
-annotations <- getBM(
-  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
-  filters = c("chromosome_name", "start", "end"),
-  values = list(hyper_cpgs_subset$chr, hyper_cpgs_subset$start, hyper_cpgs_subset$end),
-  mart = ensembl
-)
-
-# Merge the annotations with your original CpG data
-annotated_cpgs <- hyper_cpgs_subset %>%
-  left_join(annotations, by = c("chr" = "chromosome_name", "start" = "start_position"))
-
-# Display the first few rows to check the results
-head(annotated_cpgs)
 ```
 
 We need to prepare two things: 
@@ -100,6 +55,7 @@ hallmarks_list <- lapply(hallmarks, function(gs) {
 # Flatten the list structure to obtain a single list with hallmark names as keys
 ptw.ls <- unlist(hallmarks_list, recursive = FALSE)
 ```
+
 ```{r}
 # Load the percentage methylation data
 percentage_meth <- read_tsv("data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz")
@@ -107,6 +63,7 @@ percentage_meth <- read_tsv("data_maya/WTvsG34R_CRX_10W.percentage_meth.tsv.gz")
 # Display the first few rows to confirm the structure
 head(percentage_meth)
 ```
+
 ```{r}
 # Ensure the data is a regular data frame
 percentage_meth <- as.data.frame(percentage_meth)
@@ -123,13 +80,6 @@ rownames(beta_matrix) <- percentage_meth$id
 # Display the dimensions and a preview of the matrix
 cat("Dimensions of the beta matrix:", dim(beta_matrix), "\n")
 head(beta_matrix)
-```
-```{r}
-# Create a phenotype vector
-pheno.v <- c("Sample1_WT", "Sample2_WT", "Sample1_G34R", "Sample2_G34R")
-
-# Display the phenotype vector
-print(pheno.v)
 ```
 
 ```{r}
@@ -149,6 +99,15 @@ cat("Dimensions of the beta matrix subset:", dim(beta_matrix_subset), "\n")
 print(head(beta_matrix_subset))
 
 ```
+
+```{r}
+# Create a phenotype vector
+pheno.v <- c("SK059_2427_WT_CRX", "SK060_2616_WT_CRX", "SK061_2617_G34R_CRX", "SK062_2428_G34R_CRX")
+
+# Display the phenotype vector
+print(pheno.v)
+```
+
 ```{r}
 # Remove rows with any NA, NaN, or Inf values
 beta_matrix_subset <- beta_matrix_subset[complete.cases(beta_matrix_subset) & 
@@ -171,141 +130,54 @@ if (!all(sapply(beta_matrix_subset, is.numeric))) {
 # Display a summary of the matrix
 summary(beta_matrix_subset)
 ```
-```{r}
-# Replace any NA, NaN, or Inf values with the column mean
-for (i in 1:ncol(beta_matrix_subset)) {
-  col_values <- beta_matrix_subset[, i]
-  col_mean <- mean(col_values[is.finite(col_values)], na.rm = TRUE)
-  col_values[is.na(col_values) | is.nan(col_values) | is.infinite(col_values)] <- col_mean
-  beta_matrix_subset[, i] <- col_values
-}
-```
-
-```{r}
-cat("Number of columns in beta_matrix_subset:", ncol(beta_matrix_subset), "\n")
-cat("Length of pheno.v:", length(pheno.v), "\n")
-
-if (ncol(beta_matrix_subset) != length(pheno.v)) {
-  stop("Error: The number of columns in beta_matrix_subset does not match the length of pheno.v")
-}
-```
 
 ```{r}
 source("doGT_custom.R")
 ```
 
 ```{r}
-library(readr)
-library(biomaRt)
-library(GenomicRanges)
-library(IRanges)
+# Construct chromosomal_region in the query dataset
+hyper_cpgs_subset <- hyper_cpgs_subset %>%
+  mutate(query_id = paste0(chr, "_", start, "_", end),
+         chromosomal_region = paste0(chr, ":", start, "-", end))
 
-# Function to create custom mapping
-create_custom_mapping <- function(diff_data_path, pvalue_threshold = 0.05, sample_size = 1000) {
-  
-  # Step 1: Read the differential methylation data
-  diff_data <- readr::read_tsv(diff_data_path, col_names = TRUE)
-  
-  # Step 2: Filter for significant CpGs (p-value < threshold)
-  significant_cpgs <- diff_data %>% filter(pvalue < pvalue_threshold)
-  hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
-  hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
-  
-  # Step 3: Create a subset of hypermethylated CpGs for annotation (for debugging, we can sample)
-  set.seed(123)
-  hyper_cpgs_subset <- hyper_cpgs %>% sample_n(min(sample_size, nrow(hyper_cpgs)))
-  
-  # Generate unique cpg_id
-  hyper_cpgs_subset <- hyper_cpgs_subset %>%
-    mutate(cpg_id = paste0(chr, "_", start, "_", end))
-  
-  # Step 4: Connect to Ensembl for mouse genome annotation (GRCm38)
-  ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
-  
-  # Step 5: Construct chromosomal regions for the query
-  hyper_cpgs_subset <- hyper_cpgs_subset %>%
-    mutate(
-      query_id = paste0(chr, "_", start, "_", end),
-      chromosomal_region = paste0(chr, ":", start, "-", end)
-    )
-  
-  # Step 6: Retrieve gene annotations using biomaRt
-  hyper_annotations <- getBM(
-    attributes = c("chromosome_name", "start_position", "end_position", "ensembl_gene_id", "external_gene_name"),
-    filters = "chromosomal_region",
-    values = hyper_cpgs_subset$chromosomal_region,
-    mart = ensembl
-  )
-  
-  # Add chromosomal_region column to the annotations
-  hyper_annotations <- hyper_annotations %>%
-    mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
-  
-  # Filter out rows without gene names
-  hyper_annotations <- hyper_annotations %>%
-    filter(!is.na(external_gene_name) & external_gene_name != "")
-  
-  # Step 7: Extract chr, start, and end from cpg_id for hyper_cpgs_subset
-  hyper_cpgs_subset <- hyper_cpgs_subset %>%
-    mutate(
-      chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
-      start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
-      end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
-    )
-  
-  # Parse chromosomal_region in hyper_annotations to chr, start, and end
-  hyper_annotations <- hyper_annotations %>%
-    mutate(
-      chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
-      start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
-      end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
-    )
-  
-  # Step 8: Convert CpG data to GRanges object
-  cpg_gr <- GRanges(
-    seqnames = hyper_cpgs_subset$chr,
-    ranges = IRanges(start = hyper_cpgs_subset$start, end = hyper_cpgs_subset$end),
-    cpg_id = hyper_cpgs_subset$cpg_id
-  )
-  
-  # Convert gene annotation data to GRanges object
-  gene_gr <- GRanges(
-    seqnames = hyper_annotations$chr,
-    ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
-    external_gene_name = hyper_annotations$external_gene_name
-  )
-  
-  # Step 9: Find overlaps between CpG ranges and gene ranges
-  overlaps <- findOverlaps(cpg_gr, gene_gr)
-  
-  # Map each CpG to all overlapping genes
-  mapped_genes <- data.frame(
-    cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
-    external_gene_name = mcols(gene_gr)$external_gene_name[subjectHits(overlaps)]
-  )
-  
-  # Convert hyper_cpgs_subset to tibble for merging
-  hyper_cpgs_subset <- as_tibble(hyper_cpgs_subset)
-  
-  # Join the mapped genes with CpG p-values
-  custom_mapping <- mapped_genes %>%
-    left_join(hyper_cpgs_subset %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
-  
-  # Step 10: Return the custom mapping
-  return(custom_mapping)
-}
+# Retrieve gene annotations for hypermethylated CpGs
+hyper_annotations <- getBM(
+  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  filters = "chromosomal_region",
+  values = hyper_cpgs_subset$chromosomal_region,
+  mart = ensembl
+)
 
-# Example usage of the function
-custom_map <- create_custom_mapping("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz")
-print(head(custom_map))
+# Add chromosomal_region column to the result
+hyper_annotations <- hyper_annotations %>%
+  mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+
+# Filter out rows with NA in the external_gene_name column
+hyper_annotations <- hyper_annotations %>%
+  filter(!is.na(external_gene_name) & external_gene_name != "" & !grepl("^\\s*$", external_gene_name))
+
+# Display the first few rows to confirm
+head(hyper_annotations)
+```
+
+
+```{r}
+library(dplyr)
+library(tibble)
+
+# Convert `mapped_genes` into a list where each CpG ID is associated with one or more gene names
+custom_mapping <- mapped_genes %>%
+  group_by(cpg_id) %>%
+  summarise(genes = list(unique(external_gene_name))) %>%
+  deframe()
+
+# Display a preview of the custom mapping
+head(custom_mapping, 15)
 ```
 
 ```{r}
-custom_map <- create_custom_mapping("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz")
-print(head(custom_map))
-```
-
-```{r}
+library(parallel)
 library(ebGSEA)
 
 # Run Global Test with a workaround
@@ -316,13 +188,17 @@ tryCatch({
     model = c("linear"),
     array = "custom",
     ncores = 4,
-    custom_map = custom_map
+    custom_map = custom_mapping
   )
   print("Global Test completed successfully")
   print(head(sgt.m))
 }, error = function(e) {
   cat("Error in doGT:", e$message, "\n")
 })
+```
+```{r}
+common_cpgs <- intersect(rownames(beta_matrix_subset), names(custom_mapping))
+cat("Number of common CpGs:", length(common_cpgs), "\n")
 ```
 
 ```{r}

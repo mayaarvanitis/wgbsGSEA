@@ -83,18 +83,6 @@ We need to prepare two things:
 2. the beta value matrix 
 
 ```{r}
-# Perform PCA on the beta values
-beta_matrix <- matrix(runif(1000), nrow = 100, ncol = 10) # Example beta matrix
-pca <- prcomp(t(beta_matrix), scale. = TRUE)
-plot(pca$x[, 1:2], main = "PCA of Methylation Data")
-```
-
-```{r}
-# Create a phenotype vector based on clustering results
-pheno.v <- kmeans(beta_matrix, centers = 2)$cluster
-```
-
-```{r}
 library(msigdb)
 ```
 
@@ -138,7 +126,7 @@ head(beta_matrix)
 ```
 ```{r}
 # Create a phenotype vector
-pheno.v <- c("WT", "WT", "G34R", "G34R")
+pheno.v <- c("Sample1_WT", "Sample2_WT", "Sample1_G34R", "Sample2_G34R")
 
 # Display the phenotype vector
 print(pheno.v)
@@ -203,217 +191,138 @@ if (ncol(beta_matrix_subset) != length(pheno.v)) {
 ```
 
 ```{r}
-# Convert the phenotype vector to numeric: "WT" -> 0, "G34R" -> 1
-pheno.v <- ifelse(pheno.v == "WT", 0, 1)
-
-# Display the updated phenotype vector
-cat("Updated pheno.v:", pheno.v, "\n")
-
+source("doGT_custom.R")
 ```
 
 ```{r}
-# Check dimensions
-cat("Number of columns in beta_matrix_subset:", ncol(beta_matrix_subset), "\n")
-cat("Length of pheno.v:", length(pheno.v), "\n")
-
-# They should be equal
-if (ncol(beta_matrix_subset) != length(pheno.v)) {
-  stop("Mismatch: The number of columns in the beta matrix does not match the length of the phenotype vector.")
-}
-```
-
-```{r}
-# Remove rows with any NA, NaN, or Inf values
-beta_matrix_subset <- beta_matrix_subset[complete.cases(beta_matrix_subset) & 
-                                         !apply(beta_matrix_subset, 1, function(row) any(is.nan(row) | is.infinite(row))), ]
-
-cat("Dimensions after removing problematic rows:", dim(beta_matrix_subset), "\n")
-```
-
-```{r}
-# Confirm that pheno.v is numeric and contains only 0s and 1s
-print(unique(pheno.v))
-if (!all(pheno.v %in% c(0, 1))) {
-  stop("Phenotype vector contains values other than 0 and 1.")
-}
-```
-```{r}
-# Load necessary libraries
-library(ebGSEA)
-library(dplyr)
-
-# Step 1: Confirm that the beta matrix and phenotype vector are properly loaded
-cat("\nStep 1: Checking beta matrix and phenotype vector dimensions...\n")
-cat("Number of rows in beta_matrix_subset:", nrow(beta_matrix_subset), "\n")
-cat("Number of columns in beta_matrix_subset:", ncol(beta_matrix_subset), "\n")
-cat("Length of pheno.v:", length(pheno.v), "\n")
-
-# Step 2: Ensure the number of columns in beta_matrix matches the length of pheno.v
-if (ncol(beta_matrix_subset) != length(pheno.v)) {
-  stop("Error: The number of columns in beta_matrix_subset does not match the length of pheno.v")
-}
-
-# Step 3: Check for NA, NaN, or Inf values in the beta matrix and remove problematic rows
-cat("\nStep 2: Checking for NA, NaN, or Inf values in beta matrix...\n")
-beta_matrix_subset <- beta_matrix_subset[complete.cases(beta_matrix_subset) & 
-                                         !apply(beta_matrix_subset, 1, function(row) any(is.nan(row) | is.infinite(row))), ]
-
-# Display updated dimensions
-cat("Dimensions after removing problematic rows:", dim(beta_matrix_subset), "\n")
-
-# Step 4: Ensure the beta matrix is non-empty after filtering
-if (nrow(beta_matrix_subset) == 0 || ncol(beta_matrix_subset) == 0) {
-  stop("Error: Beta matrix is empty after filtering for NA values.")
-}
-
-# Step 5: Confirm data types of beta matrix and phenotype vector
-cat("\nStep 3: Checking data types...\n")
-if (!is.matrix(beta_matrix_subset)) {
-  cat("Converting beta_matrix_subset to matrix...\n")
-  beta_matrix_subset <- as.matrix(beta_matrix_subset)
-}
-
-if (!is.numeric(pheno.v)) {
-  cat("Converting pheno.v to numeric...\n")
-  pheno.v <- as.numeric(pheno.v)
-}
-
-# Display a preview of the data
-cat("\nStep 4: Preview of cleaned data...\n")
-print(head(beta_matrix_subset))
-cat("Phenotype vector:", pheno.v, "\n")
-cat("Unique values in phenotype vector:", unique(pheno.v), "\n")
-
-# Step 6: Ensure phenotype vector contains only 0s and 1s
-cat("\nStep 5: Validating phenotype vector values...\n")
-if (!all(pheno.v %in% c(0, 1))) {
-  stop("Error: Phenotype vector contains values other than 0 and 1.")
-}
-```
-```{r}
-# Ensure the column names of the beta matrix are consistent
-cat("Column names of beta_matrix_subset:", colnames(beta_matrix_subset), "\n")
-cat("Phenotype vector:", pheno.v, "\n")
-
-# Check if column names are correct and adjust if needed
-if (length(colnames(beta_matrix_subset)) != length(pheno.v)) {
-  stop("Mismatch between column names and phenotype vector length.")
-}
-```
-
-```{r}
-# Simplify column names
-colnames(beta_matrix_subset) <- make.names(colnames(beta_matrix_subset))
-cat("Updated column names:", colnames(beta_matrix_subset), "\n")
-# Convert the beta matrix to numeric
-beta_matrix_subset <- as.matrix(apply(beta_matrix_subset, 2, as.numeric))
-# Check the structure of the beta matrix
-cat("Structure of beta_matrix_subset:\n")
-str(beta_matrix_subset)
-
-# Remove row names if necessary
-rownames(beta_matrix_subset) <- NULL
-
-```
-
-
-```{r}
-cat("\nAttempting to run doGT with the cleaned data...\n")
-
-tryCatch({
-  sgt.m <- doGT(
-    pheno.v = pheno.v,
-    data.m = beta_matrix_subset,
-    array = "450k",
-    ncores = 4
-  )
-  cat("Global Test completed successfully.\n")
-  print(head(sgt.m))
-}, error = function(e) {
-  cat("Error in doGT:", e$message, "\n")
-  if (grepl("subscript out of bounds", e$message)) {
-    cat("Potential issue with the matrix or phenotype vector alignment.\n")
-  }
-})
-
-```
-```{r}
-# Step 1: Ensure the beta matrix is a proper matrix
-beta_matrix_subset <- as.matrix(beta_matrix_subset)
-
-# Step 2: Ensure the column names are consistent and match the phenotype vector
-cat("Column names of beta_matrix_subset:", colnames(beta_matrix_subset), "\n")
-cat("Phenotype vector:", pheno.v, "\n")
-
-# Check if the number of columns matches the length of the phenotype vector
-if (ncol(beta_matrix_subset) != length(pheno.v)) {
-  stop("Error: The number of columns in beta_matrix_subset does not match the length of pheno.v")
-}
-
-# Step 3: Simplify and clean up column names
-colnames(beta_matrix_subset) <- make.names(colnames(beta_matrix_subset))
-cat("Updated column names:", colnames(beta_matrix_subset), "\n")
-
-# Step 4: Ensure row names are set correctly (assuming CpG IDs are available)
-if (is.null(rownames(beta_matrix_subset)) || any(rownames(beta_matrix_subset) == "")) {
-  rownames(beta_matrix_subset) <- paste0("CpG_", seq_len(nrow(beta_matrix_subset)))
-}
-cat("First few row names of beta_matrix_subset:", head(rownames(beta_matrix_subset)), "\n")
-
-# Step 5: Confirm that the phenotype vector is numeric and contains only 0s and 1s
-pheno.v <- as.numeric(pheno.v)
-if (!all(pheno.v %in% c(0, 1))) {
-  stop("Error: Phenotype vector contains values other than 0 and 1.")
-}
-cat("Phenotype vector after conversion:", pheno.v, "\n")
-
-# Step 6: Attempt to run doGT with the cleaned data
-cat("\nAttempting to run doGT with the cleaned data...\n")
-tryCatch({
-  sgt.m <- doGT(
-    pheno.v = pheno.v,
-    data.m = beta_matrix_subset,
-    array = "450k",
-    ncores = 4
-  )
-  cat("Global Test completed successfully.\n")
-  print(head(sgt.m))
-}, error = function(e) {
-  cat("Error in doGT:", e$message, "\n")
-  if (grepl("colnames missing in alternative design matrix", e$message)) {
-    cat("Please ensure the beta matrix has proper row and column names.\n")
-  }
-})
-```
-```{r}
+library(readr)
 library(biomaRt)
+library(GenomicRanges)
+library(IRanges)
 
-# Connect to the Ensembl database for mouse
-ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+# Function to create custom mapping
+create_custom_mapping <- function(diff_data_path, pvalue_threshold = 0.05, sample_size = 1000) {
+  
+  # Step 1: Read the differential methylation data
+  diff_data <- readr::read_tsv(diff_data_path, col_names = TRUE)
+  
+  # Step 2: Filter for significant CpGs (p-value < threshold)
+  significant_cpgs <- diff_data %>% filter(pvalue < pvalue_threshold)
+  hyper_cpgs <- significant_cpgs %>% filter(meth.diff > 0)
+  hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
+  
+  # Step 3: Create a subset of hypermethylated CpGs for annotation (for debugging, we can sample)
+  set.seed(123)
+  hyper_cpgs_subset <- hyper_cpgs %>% sample_n(min(sample_size, nrow(hyper_cpgs)))
+  
+  # Generate unique cpg_id
+  hyper_cpgs_subset <- hyper_cpgs_subset %>%
+    mutate(cpg_id = paste0(chr, "_", start, "_", end))
+  
+  # Step 4: Connect to Ensembl for mouse genome annotation (GRCm38)
+  ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
+  
+  # Step 5: Construct chromosomal regions for the query
+  hyper_cpgs_subset <- hyper_cpgs_subset %>%
+    mutate(
+      query_id = paste0(chr, "_", start, "_", end),
+      chromosomal_region = paste0(chr, ":", start, "-", end)
+    )
+  
+  # Step 6: Retrieve gene annotations using biomaRt
+  hyper_annotations <- getBM(
+    attributes = c("chromosome_name", "start_position", "end_position", "ensembl_gene_id", "external_gene_name"),
+    filters = "chromosomal_region",
+    values = hyper_cpgs_subset$chromosomal_region,
+    mart = ensembl
+  )
+  
+  # Add chromosomal_region column to the annotations
+  hyper_annotations <- hyper_annotations %>%
+    mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
+  
+  # Filter out rows without gene names
+  hyper_annotations <- hyper_annotations %>%
+    filter(!is.na(external_gene_name) & external_gene_name != "")
+  
+  # Step 7: Extract chr, start, and end from cpg_id for hyper_cpgs_subset
+  hyper_cpgs_subset <- hyper_cpgs_subset %>%
+    mutate(
+      chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+      start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+      end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+    )
+  
+  # Parse chromosomal_region in hyper_annotations to chr, start, and end
+  hyper_annotations <- hyper_annotations %>%
+    mutate(
+      chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+      start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+      end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+    )
+  
+  # Step 8: Convert CpG data to GRanges object
+  cpg_gr <- GRanges(
+    seqnames = hyper_cpgs_subset$chr,
+    ranges = IRanges(start = hyper_cpgs_subset$start, end = hyper_cpgs_subset$end),
+    cpg_id = hyper_cpgs_subset$cpg_id
+  )
+  
+  # Convert gene annotation data to GRanges object
+  gene_gr <- GRanges(
+    seqnames = hyper_annotations$chr,
+    ranges = IRanges(start = hyper_annotations$start, end = hyper_annotations$end),
+    external_gene_name = hyper_annotations$external_gene_name
+  )
+  
+  # Step 9: Find overlaps between CpG ranges and gene ranges
+  overlaps <- findOverlaps(cpg_gr, gene_gr)
+  
+  # Map each CpG to all overlapping genes
+  mapped_genes <- data.frame(
+    cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
+    external_gene_name = mcols(gene_gr)$external_gene_name[subjectHits(overlaps)]
+  )
+  
+  # Convert hyper_cpgs_subset to tibble for merging
+  hyper_cpgs_subset <- as_tibble(hyper_cpgs_subset)
+  
+  # Join the mapped genes with CpG p-values
+  custom_mapping <- mapped_genes %>%
+    left_join(hyper_cpgs_subset %>% dplyr::select(cpg_id, pvalue), by = "cpg_id")
+  
+  # Step 10: Return the custom mapping
+  return(custom_mapping)
+}
 
-# Annotate CpG sites with Ensembl gene IDs
-annotations <- getBM(
-  attributes = c("chromosome_name", "start_position", "end_position", "ensembl_gene_id"),
-  filters = c("chromosome_name", "start", "end"),
-  values = list(percentage_meth$chr, percentage_meth$start, percentage_meth$end),
-  mart = ensembl
-)
-
-# Merge annotations with your CpG data
-annotated_data <- merge(percentage_meth, annotations, by.x = c("chr", "start", "end"), by.y = c("chromosome_name", "start_position", "end_position"))
+# Example usage of the function
+custom_map <- create_custom_mapping("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz")
+print(head(custom_map))
 ```
 
 ```{r}
-# Convert the beta matrix to numeric
-beta_matrix_subset <- as.matrix(apply(beta_matrix_subset, 2, as.numeric))
+custom_map <- create_custom_mapping("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz")
+print(head(custom_map))
+```
 
-# Ensure column names are set correctly
-colnames(beta_matrix_subset) <- c("SK059_2427_WT_CRX", "SK060_2616_WT_CRX", "SK061_2617_G34R_CRX", "SK062_2428_G34R_CRX")
+```{r}
+library(ebGSEA)
 
-# Verify that column names match the phenotype vector length
-if (ncol(beta_matrix_subset) != length(pheno.v)) {
-  stop("Mismatch between beta matrix columns and phenotype vector length.")
-}
+# Run Global Test with a workaround
+tryCatch({
+  sgt.m <- doGT_custom(
+    pheno.v = pheno.v,
+    data.m = beta_matrix_subset,
+    model = c("linear"),
+    array = "custom",
+    ncores = 4,
+    custom_map = custom_map
+  )
+  print("Global Test completed successfully")
+  print(head(sgt.m))
+}, error = function(e) {
+  cat("Error in doGT:", e$message, "\n")
+})
 ```
 
 ```{r}

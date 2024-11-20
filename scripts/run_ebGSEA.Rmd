@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 # Install remotes if not already installed
-if (!requireNamespace("remotes", quietly = TRUE)) {
+if (!requireNamespace("remotes", quietly = TRUE)) {=
     install.packages("remotes")
 }
 
@@ -110,6 +110,7 @@ annotations <- annotations %>%
 # Display the first few rows to confirm
 head(annotations)
 ```
+
 ```{r}
 # Assume hyper_cpgs_subset has a 'cpg_id' column with the format "chr_start_end"
 percentage_meth_subset <- as.data.frame(percentage_meth_subset)
@@ -221,8 +222,10 @@ head(beta_matrix)
 # Create a phenotype vector
 pheno.v <- c("SK059_2427_WT_CRX", "SK060_2616_WT_CRX", "SK061_2617_G34R_CRX", "SK062_2428_G34R_CRX")
 
+pheno.v_binary <- ifelse(grepl("WT", pheno.v), 0, 1)
+
 # Display the phenotype vector
-print(pheno.v)
+print(pheno.v_binary)
 ```
 
 ```{r}
@@ -292,19 +295,22 @@ print(head(beta_matrix_valid))
 
 ```
 ```{r}
-rownames(beta_matrix) <- trimws(rownames(beta_matrix))
+rownames(beta_matrix_valid) <- trimws(rownames(beta_matrix_valid))
 custom_mapping <- trimws(custom_mapping)
+
 # Trim any leading/trailing whitespaces from both sets
-rownames(beta_matrix) <- trimws(rownames(beta_matrix))
-names(custom_mapping) <- trimws(names(custom_mapping))
+rownames(beta_matrix_valid) <- trimws(rownames(beta_matrix_valid))
+names(custom_mapping_valid) <- trimws(names(custom_mapping_valid))
 
 # Recheck the intersection after trimming
-common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
 cat("Number of common CpGs:", length(common_cpgs), "\n")
-# Print the first few CpG IDs in both datasets for inspection
-head(rownames(beta_matrix))
-head(names(custom_mapping))
 
+# Print the first few CpG IDs in both datasets for inspection
+head(rownames(beta_matrix_valid))
+head(names(custom_mapping_valid))
+
+common_cpgs <- intersect(rownames(beta_matrix_valid), names(custom_mapping_valid))
+length(common_cpgs)
 ```
 
 ```{r}
@@ -312,29 +318,29 @@ test_mclapply <- mclapply(1:5, function(i) i^2, mc.cores = 1)
 print(test_mclapply)
 
 ```
+
+
 ```{r}
-# Create a data frame from the beta matrix
-beta_matrix_with_genes <- data.frame(
-  cpg_id = rownames(beta_matrix_valid),  # CpG IDs
-  beta_matrix_valid                      # Beta values for each CpG
-)
+# Check for NA, NaN, or Inf in beta_matrix
+if (any(is.na(beta_matrix_valid)) || any(is.nan(beta_matrix_valid)) || any(is.infinite(beta_matrix_valid))) {
+  cat("Error: Beta matrix contains NA, NaN, or Inf values.\n")
+} else {
+  cat("No NA/NaN/Inf values in beta matrix.\n")
+}
 
-# Assuming `custom_mapping_valid` maps CpG IDs to gene names
-beta_matrix_with_genes$gene_name <- custom_mapping_valid[beta_matrix_with_genes$cpg_id]
-
-# Check the result
-head(beta_matrix_with_genes)
+beta_matrix_valid <- beta_matrix_valid[complete.cases(beta_matrix_valid) & !apply(beta_matrix_valid, 1, function(row) any(is.nan(row) | is.infinite(row))), ]
 
 ```
 
 ```{r}
 library(parallel)
 library(ebGSEA)
+library(globaltest)
 
 tryCatch({
   sgt.m <- doGT_custom(
-    pheno.v = pheno.v,
-    data.m = beta_matrix_with_genes,
+    pheno.v = pheno.v_binary,
+    data.m = beta_matrix_valid,
     model = c("linear"),
     array = "custom",
     ncores = 1,

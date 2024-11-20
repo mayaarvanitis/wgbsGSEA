@@ -28,6 +28,7 @@ library(readr)
 library(ggplot2)
 library(dplyr)
 ```
+
 ```{r}
 # Connect to Ensembl for mouse genome annotation
 ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
@@ -65,102 +66,101 @@ head(percentage_meth)
 ```
 
 ```{r}
-# Ensure the data is a regular data frame
-percentage_meth <- as.data.frame(percentage_meth)
+set.seed(123)
 
-# Extract only the columns with methylation percentages (assuming they start at column 5)
-beta_values <- percentage_meth[, 5:ncol(percentage_meth)] / 100  # Convert percentages to beta values
+# Number of rows to subset (adjust as needed)
+num_rows <- 1000
 
-# Convert the extracted values to a matrix
-beta_matrix <- as.matrix(beta_values)
+# Ensure the subset size does not exceed the number of rows in the original data
+num_rows <- min(num_rows, nrow(percentage_meth))
 
-# Set row names as CpG site identifiers
-rownames(beta_matrix) <- percentage_meth$id
+# Randomly sample rows from the data
+percentage_meth_subset <- percentage_meth[sample(1:nrow(percentage_meth), num_rows), ]
 
-# Display the dimensions and a preview of the matrix
-cat("Dimensions of the beta matrix:", dim(beta_matrix), "\n")
-head(beta_matrix)
-```
+percentage_meth_subset <- percentage_meth_subset %>%
+  mutate(cpg_id = paste0(chr, "_", start, "_", end))
 
-```{r}
-set.seed(123) # Ensure reproducibility
-
-# Number of rows (CpGs) to select for the subset
-num_rows <- 100   # Adjust this number as needed
-
-# Ensure the subset size does not exceed the number of rows in the original beta matrix
-num_rows <- min(num_rows, nrow(beta_matrix))
-
-# Randomly sample rows (CpGs) while keeping all columns (samples)
-beta_matrix_subset <- beta_matrix[sample(1:nrow(beta_matrix), num_rows), ]
-
-# Display the dimensions and a preview of the subset
-cat("Dimensions of the beta matrix subset:", dim(beta_matrix_subset), "\n")
-print(head(beta_matrix_subset))
-
-```
-
-```{r}
-# Create a phenotype vector
-pheno.v <- c("SK059_2427_WT_CRX", "SK060_2616_WT_CRX", "SK061_2617_G34R_CRX", "SK062_2428_G34R_CRX")
-
-# Display the phenotype vector
-print(pheno.v)
-```
-
-```{r}
-# Remove rows with any NA, NaN, or Inf values
-beta_matrix_subset <- beta_matrix_subset[complete.cases(beta_matrix_subset) & 
-                                         !apply(beta_matrix_subset, 1, function(row) any(is.nan(row) | is.infinite(row))), ]
-
-# Display the updated dimensions
-cat("Dimensions after removing problematic rows:", dim(beta_matrix_subset), "\n")
-```
-
-```{r}
-# Ensure the matrix is numeric
-beta_matrix_subset <- as.matrix(beta_matrix_subset)
-storage.mode(beta_matrix_subset) <- "double"
-
-# Check if all entries are numeric
-if (!all(sapply(beta_matrix_subset, is.numeric))) {
-  stop("Error: The matrix contains non-numeric values")
-}
-
-# Display a summary of the matrix
-summary(beta_matrix_subset)
-```
-
-```{r}
-source("doGT_custom.R")
+# Display the dimensions and the first few rows of the subset
+cat("Dimensions of the subset:", dim(percentage_meth_subset), "\n")
+print(head(percentage_meth_subset))
 ```
 
 ```{r}
 # Construct chromosomal_region in the query dataset
-hyper_cpgs_subset <- hyper_cpgs_subset %>%
+percentage_meth_subset <- percentage_meth_subset %>%
   mutate(query_id = paste0(chr, "_", start, "_", end),
          chromosomal_region = paste0(chr, ":", start, "-", end))
 
 # Retrieve gene annotations for hypermethylated CpGs
-hyper_annotations <- getBM(
+annotations <- getBM(
   attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
   filters = "chromosomal_region",
-  values = hyper_cpgs_subset$chromosomal_region,
+  values = percentage_meth_subset$chromosomal_region,
   mart = ensembl
 )
 
 # Add chromosomal_region column to the result
-hyper_annotations <- hyper_annotations %>%
+annotations <- annotations %>%
   mutate(chromosomal_region = paste0(chromosome_name, "_", start_position, "_", end_position))
 
 # Filter out rows with NA in the external_gene_name column
-hyper_annotations <- hyper_annotations %>%
+annotations <- annotations %>%
   filter(!is.na(external_gene_name) & external_gene_name != "" & !grepl("^\\s*$", external_gene_name))
 
 # Display the first few rows to confirm
-head(hyper_annotations)
+head(annotations)
 ```
+```{r}
+# Assume hyper_cpgs_subset has a 'cpg_id' column with the format "chr_start_end"
+percentage_meth_subset <- as.data.frame(percentage_meth_subset)
 
+# Extract chr, start, and end from cpg_id
+percentage_meth_subset <- percentage_meth_subset %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", cpg_id),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", cpg_id)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", cpg_id))
+  )
+
+# Parse 'chromosomal_region' in hyper_annotations to chr, start, and end
+annotations <- annotations %>%
+  mutate(
+    chr = sub("^(.*)_.*_.*$", "\\1", chromosomal_region),
+    start = as.numeric(sub("^.*_(.*)_.*$", "\\1", chromosomal_region)),
+    end = as.numeric(sub("^.*_.*_(.*)$", "\\1", chromosomal_region))
+  )
+
+# Convert CpG data to GRanges object
+cpg_gr <- GRanges(
+  seqnames = percentage_meth_subset$chr,
+  ranges = IRanges(start = percentage_meth_subset$start, end = percentage_meth_subset$end),
+  cpg_id = percentage_meth_subset$cpg_id
+)
+
+# Convert gene annotation data to GRanges object
+gene_gr <- GRanges(
+  seqnames = annotations$chr,
+  ranges = IRanges(start = annotations$start, end = annotations$end),
+  external_gene_name = annotations$external_gene_name
+)
+
+# Find overlaps between CpG ranges and gene ranges
+overlaps <- findOverlaps(cpg_gr, gene_gr)
+
+# Map each CpG to all overlapping genes
+mapped_genes <- data.frame(
+  cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
+  external_gene_name = mcols(gene_gr)$external_gene_name[subjectHits(overlaps)]
+)
+
+percentage_meth_subset <- as_tibble(percentage_meth_subset)
+
+mapped_genes <- mapped_genes %>%
+  left_join(percentage_meth_subset %>% dplyr::select(cpg_id), by = "cpg_id")
+
+# Check the result
+print(head(mapped_genes))
+```
 
 ```{r}
 library(dplyr)
@@ -174,36 +174,182 @@ custom_mapping <- mapped_genes %>%
 
 # Display a preview of the custom mapping
 head(custom_mapping, 15)
+
+invalid_mappings <- which(sapply(custom_mapping, length) == 0)
+if (length(invalid_mappings) > 0) {
+  cat("Found empty mappings for CpGs:\n")
+  print(names(custom_mapping)[invalid_mappings])
+  custom_mapping <- custom_mapping[-invalid_mappings]
+  cat("Updated custom_mapping size:", length(custom_mapping), "\n")
+}
+
+genes_in_mapping <- unique(unlist(custom_mapping))
+genes_in_ptw <- unique(unlist(ptw.ls))
+
+common_genes <- intersect(genes_in_mapping, genes_in_ptw)
+cat("Number of common genes between custom_mapping and ptw.ls:", length(common_genes), "\n")
+
+if (length(common_genes) == 0) {
+  stop("Error: No overlap between custom_mapping and ptw.ls genes.")
+}
+```
+
+```{r}
+# Ensure the data is a regular data frame
+percentage_meth_df <- as.data.frame(percentage_meth_subset)
+
+percentage_meth_df <- percentage_meth_df[, !colnames(percentage_meth_df) %in% c("start", "end")]
+
+# Identify the columns with numeric data (assuming they contain methylation percentages)
+numeric_columns <- sapply(percentage_meth_df, is.numeric)
+
+# Extract only the numeric columns (methylation percentages)
+beta_values <- percentage_meth_df[, numeric_columns] / 100  # Convert percentages to beta values
+
+# Convert the extracted values to a matrix
+beta_matrix <- as.matrix(beta_values)
+
+# Set row names as CpG site identifiers in the "chr_start_end" format
+rownames(beta_matrix) <- percentage_meth_df$cpg_id
+
+# Display the dimensions and a preview of the matrix
+cat("Dimensions of the beta matrix:", dim(beta_matrix), "\n")
+head(beta_matrix)
+```
+
+```{r}
+# Create a phenotype vector
+pheno.v <- c("SK059_2427_WT_CRX", "SK060_2616_WT_CRX", "SK061_2617_G34R_CRX", "SK062_2428_G34R_CRX")
+
+# Display the phenotype vector
+print(pheno.v)
+```
+
+```{r}
+source("doGT_custom.R")
+```
+
+```{r}
+# Install the globaltest package if not already installed
+if (!requireNamespace("globaltest", quietly = TRUE)) {
+  install.packages("BiocManager")
+  BiocManager::install("globaltest")
+}
+
+# Load the globaltest package
+library(globaltest)
+```
+
+```{r}
+# Double-check formatting of CpG IDs in custom_mapping
+names(custom_mapping) <- gsub(":", "_", names(custom_mapping))
+names(custom_mapping) <- gsub("-", "_", names(custom_mapping))
+
+# Ensure that the format matches with rownames of beta_matrix
+common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
+cat("Number of common CpGs:", length(common_cpgs), "\n")
+
+common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
+cat("Number of common CpGs:", length(common_cpgs), "\n")
+
+# If overlap is zero, display a sample of CpG IDs
+if (length(common_cpgs) == 0) {
+  cat("Sample CpG IDs from beta_matrix:\n")
+  print(head(rownames(beta_matrix)))
+  
+  cat("Sample CpG IDs from custom_mapping:\n")
+  print(head(names(custom_mapping)))
+}
+
+# Check for missing values in beta_matrix
+if (any(is.na(beta_matrix)) || any(is.nan(beta_matrix)) || any(is.infinite(beta_matrix))) {
+  stop("Error: Beta matrix contains missing, NaN, or infinite values.")
+}
+
+# Check for empty gene lists in custom_mapping
+empty_genes <- which(sapply(custom_mapping, length) == 0)
+if (length(empty_genes) > 0) {
+  cat("Found empty mappings for CpGs:\n")
+  print(names(custom_mapping)[empty_genes])
+  
+  # Remove empty mappings
+  custom_mapping <- custom_mapping[-empty_genes]
+  cat("Updated custom_mapping size:", length(custom_mapping), "\n")
+}
+
+```
+
+```{r}
+common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
+cat("Number of common CpGs:", length(common_cpgs), "\n")
+# Subset custom_mapping and beta_matrix to include only common CpGs
+custom_mapping_valid <- custom_mapping[common_cpgs]
+beta_matrix_valid <- beta_matrix[common_cpgs, , drop = FALSE]
+
+# Check the dimensions and preview
+cat("Dimensions of valid beta matrix:", dim(beta_matrix_valid), "\n")
+print(head(beta_matrix_valid))
+
+```
+```{r}
+rownames(beta_matrix) <- trimws(rownames(beta_matrix))
+custom_mapping <- trimws(custom_mapping)
+# Trim any leading/trailing whitespaces from both sets
+rownames(beta_matrix) <- trimws(rownames(beta_matrix))
+names(custom_mapping) <- trimws(names(custom_mapping))
+
+# Recheck the intersection after trimming
+common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
+cat("Number of common CpGs:", length(common_cpgs), "\n")
+# Print the first few CpG IDs in both datasets for inspection
+head(rownames(beta_matrix))
+head(names(custom_mapping))
+
+```
+
+```{r}
+test_mclapply <- mclapply(1:5, function(i) i^2, mc.cores = 1)
+print(test_mclapply)
+
+```
+```{r}
+# Create a data frame from the beta matrix
+beta_matrix_with_genes <- data.frame(
+  cpg_id = rownames(beta_matrix_valid),  # CpG IDs
+  beta_matrix_valid                      # Beta values for each CpG
+)
+
+# Assuming `custom_mapping_valid` maps CpG IDs to gene names
+beta_matrix_with_genes$gene_name <- custom_mapping_valid[beta_matrix_with_genes$cpg_id]
+
+# Check the result
+head(beta_matrix_with_genes)
+
 ```
 
 ```{r}
 library(parallel)
 library(ebGSEA)
 
-# Run Global Test with a workaround
 tryCatch({
   sgt.m <- doGT_custom(
     pheno.v = pheno.v,
-    data.m = beta_matrix_subset,
+    data.m = beta_matrix_with_genes,
     model = c("linear"),
     array = "custom",
-    ncores = 4,
-    custom_map = custom_mapping
+    ncores = 1,
+    custom_map = custom_mapping_valid
   )
-  print("Global Test completed successfully")
+  
+  cat("Global Test completed successfully\n")
   print(head(sgt.m))
 }, error = function(e) {
   cat("Error in doGT:", e$message, "\n")
 })
-```
-```{r}
-common_cpgs <- intersect(rownames(beta_matrix_subset), names(custom_mapping))
-cat("Number of common CpGs:", length(common_cpgs), "\n")
+
 ```
 
 ```{r}
-# Load pre-defined gene sets (you can use MSigDB hallmark sets or custom sets)
-
 # Run pathway enrichment analysis
 topGSEA.lm <- doGSEAwt(
   rankEID.m = sgt.m,
@@ -218,30 +364,11 @@ head(topGSEA.lm[[1]])
 ```
 
 ```{r}
-library(ebGSEA)
-
-# Prepare phenotype vector
-pheno.v <- c(0, 0, 1, 1)
-
-# Run Global Test with a workaround
-tryCatch({
-  sgt.m <- doGT(
-    pheno.v = pheno.v,
-    data.m = beta_matrix_subset,
-    array = "EPIC",  # Use "EPIC" as a workaround if custom type fails
-    ncores = 4
-  )
-  print("Global Test completed successfully")
-  print(head(sgt.m))
-}, error = function(e) {
-  cat("Error in doGT:", e$message, "\n")
-})
-```
-
-```{r}
 # Plot the AUC and adjusted p-values
 ggplot(topGSEA.lm[[1]], aes(x = AUC, y = -log10(adjP))) +
   geom_point() +
   labs(x = "Area Under Curve", y = "-log10(Adjusted p-value)", title = "Pathway Enrichment Analysis") +
   theme_minimal()
 ```
+
+

@@ -98,6 +98,7 @@ Note: In this project CpG IDs were formatted in chr_start_end formatting for con
    - **Rows (`CpG ID`)**: Unique identifiers for CpG sites (e.g., `cg00000029`).
    - **Columns (`Samples`)**: Beta values for each sample, representing the methylation level (ranging from 0 to 1).
 
+
 - `model` = as implemented by Dong et al [2]
 - `array` = here we have the selection now of `"custom"` allowing for custom gene mappings. As well, the original `"450k"` and `"850k"` as implemented in ebGSEA.
 - `nscores` = number of cores for parallel with default set to 4 [2]

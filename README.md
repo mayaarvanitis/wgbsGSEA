@@ -79,7 +79,7 @@ sgt.m <- doGT_custom(
 ```
 
 Where:
-- pheno.v = a binary vector whose columns are in line with those of the sample columns in data.m matrix. E.g in this case we had two Wild Type samples and Two G34R Samples. Our respective pheno.v vector was [ 0, 0, 1, 1] where 0 = WT and 1 = G34R
+- `pheno.v` = a binary vector whose columns are in line with those of the sample columns in data.m matrix. E.g in this case we had two Wild Type samples and Two G34R Samples. Our respective pheno.v vector was [ 0, 0, 1, 1] where 0 = WT and 1 = G34R
 - ## Example Structure of `data.m`
 
 The `data.m` matrix should have CpG IDs as row names and sample beta values as columns. Below is an example structure:
@@ -98,10 +98,10 @@ Note: In this project CpG IDs were formatted in chr_start_end formatting for con
 - **Rows (`CpG ID`)**: Unique identifiers for CpG sites (e.g., `cg00000029`).
 - **Columns (`Samples`)**: Beta values for each sample, representing the methylation level (ranging from 0 to 1).
 
-- model = as implemented by Dong et al [2]
-- array = here we have the selection now of "custom" allowing for custom gene mappings. As well, the original "450k" and "850k" as implemented in ebGSEA.
-- nscores = number of cores for parallel with default set to 4 [2]
-- custom_map a list of genes in ENTREZ ID format with their associated cpg ID
+- `model` = as implemented by Dong et al [2]
+- `array` = here we have the selection now of `"custom"` allowing for custom gene mappings. As well, the original `"450k"` and `"850k"` as implemented in ebGSEA.
+- `nscores` = number of cores for parallel with default set to 4 [2]
+- `custom_map` a list of genes in ENTREZ ID format with their associated cpg ID
   
 ## Example Structure of `custom_map`
 

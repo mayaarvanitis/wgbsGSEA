@@ -56,3 +56,4 @@ custom_map <- list(
   "11608" = c("cg00000745", "cg00000856")
 )
 ```
+[1] Dong Dong, Yuan Tian, Shu-Cheng Zheng, and Andrew E. Teschendorff. ebgsea: An improved gene set enrichment analysis method for epigenome-wide-association studies. Bioinformatics, 35(18):3514–3516, Sep 2019.

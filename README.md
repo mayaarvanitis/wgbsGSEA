@@ -59,7 +59,7 @@ To evaluate and implement GSEA methods for WGBS data, this project will follow t
 # MethylGSA
 ---
 
-# ebSGEA
+# ebGSEA
 ---
 ## doGT_custom.R
 

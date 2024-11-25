@@ -44,7 +44,7 @@ library(msigdb)
 
 ```{r}
 # Retrieve hallmark gene sets for mouse with Ensembl IDs
-msigdb.mm <- getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
+msigdb.mm <- getMsigdb(org = 'mm', id = 'EZID', version = '7.4')
 hallmarks = subsetCollection(msigdb.mm, 'h')
 
 # Convert hallmarks to a list of gene symbols by hallmark name
@@ -93,7 +93,7 @@ percentage_meth_subset <- percentage_meth_subset %>%
 
 # Retrieve gene annotations for hypermethylated CpGs
 annotations <- getBM(
-  attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
+  attributes = c("chromosome_name", "start_position", "end_position", "entrezgene_id"),
   filters = "chromosomal_region",
   values = percentage_meth_subset$chromosomal_region,
   mart = ensembl
@@ -105,7 +105,7 @@ annotations <- annotations %>%
 
 # Filter out rows with NA in the external_gene_name column
 annotations <- annotations %>%
-  filter(!is.na(external_gene_name) & external_gene_name != "" & !grepl("^\\s*$", external_gene_name))
+  filter(!is.na(entrezgene_id) & entrezgene_id != "" & !grepl("^\\s*$", entrezgene_id))
 
 # Display the first few rows to confirm
 head(annotations)
@@ -142,7 +142,7 @@ cpg_gr <- GRanges(
 gene_gr <- GRanges(
   seqnames = annotations$chr,
   ranges = IRanges(start = annotations$start, end = annotations$end),
-  external_gene_name = annotations$external_gene_name
+  entrezgene_id = annotations$entrezgene_id
 )
 
 # Find overlaps between CpG ranges and gene ranges
@@ -151,7 +151,7 @@ overlaps <- findOverlaps(cpg_gr, gene_gr)
 # Map each CpG to all overlapping genes
 mapped_genes <- data.frame(
   cpg_id = mcols(cpg_gr)$cpg_id[queryHits(overlaps)],
-  external_gene_name = mcols(gene_gr)$external_gene_name[subjectHits(overlaps)]
+  entrezgene_id = mcols(gene_gr)$entrezgene_id[subjectHits(overlaps)]
 )
 
 percentage_meth_subset <- as_tibble(percentage_meth_subset)
@@ -170,7 +170,7 @@ library(tibble)
 # Convert `mapped_genes` into a list where each CpG ID is associated with one or more gene names
 custom_mapping <- mapped_genes %>%
   group_by(cpg_id) %>%
-  summarise(genes = list(unique(external_gene_name))) %>%
+  summarise(genes = list(unique(entrezgene_id))) %>%
   deframe()
 
 # Display a preview of the custom mapping
@@ -238,7 +238,9 @@ if (!requireNamespace("globaltest", quietly = TRUE)) {
   install.packages("BiocManager")
   BiocManager::install("globaltest")
 }
+```
 
+```{r}
 # Load the globaltest package
 library(globaltest)
 ```
@@ -281,6 +283,9 @@ if (length(empty_genes) > 0) {
 }
 
 ```
+```{r}
+head(custom_mapping)
+```
 
 ```{r}
 common_cpgs <- intersect(rownames(beta_matrix), names(custom_mapping))
@@ -294,6 +299,8 @@ cat("Dimensions of valid beta matrix:", dim(beta_matrix_valid), "\n")
 print(head(beta_matrix_valid))
 
 ```
+
+
 ```{r}
 rownames(beta_matrix_valid) <- trimws(rownames(beta_matrix_valid))
 custom_mapping <- trimws(custom_mapping)
@@ -313,12 +320,6 @@ common_cpgs <- intersect(rownames(beta_matrix_valid), names(custom_mapping_valid
 length(common_cpgs)
 ```
 
-```{r}
-test_mclapply <- mclapply(1:5, function(i) i^2, mc.cores = 1)
-print(test_mclapply)
-
-```
-
 
 ```{r}
 # Check for NA, NaN, or Inf in beta_matrix
@@ -333,18 +334,81 @@ beta_matrix_valid <- beta_matrix_valid[complete.cases(beta_matrix_valid) & !appl
 ```
 
 ```{r}
+# Assuming mapped_genes has columns 'cpg_id' and 'external_gene_name'
+
+# Step 1: Create a mapping between row names of beta_matrix_valid and cpg_id in mapped_genes
+beta_matrix_valid_df <- as.data.frame(beta_matrix_valid)  # Convert matrix to data frame
+beta_matrix_valid_df$cpg_id <- rownames(beta_matrix_valid_df)  # Add cpg_id as a new column
+```
+
+```{r}
+# Step 2: Merge the data frame with mapped_genes on cpg_id
+merged_df <- merge(beta_matrix_valid_df, mapped_genes, by = "cpg_id", all.x = TRUE)
+head(merged_df)
+```
+
+```{r}
+# Step 3: Check for duplicates in external_gene_name
+duplicate_genes <- merged_df[duplicated(merged_df$entrezgene_id), ]
+if (nrow(duplicate_genes) > 0) {
+  message("Warning: There are duplicate gene names in the mapping.")
+  # You can decide how to handle duplicates here:
+  # Option 1: Remove duplicates (if multiple rows correspond to the same gene, you might keep only one)
+  merged_df <- merged_df[!duplicated(merged_df$entrezgene_id), ]
+  # Option 2: You might want to keep all duplicates, but handle them separately.
+}
+# Step 4: Set row names of the merged data frame to external_gene_name
+rownames(merged_df) <- merged_df$external_gene_name
+# Convert it back to a matrix if needed
+beta_matrix_valid_with_genes <- as.matrix(merged_df)
+
+beta_matrix_valid_with_genes <- beta_matrix_valid_with_genes[, !colnames(beta_matrix_valid_with_genes) %in% c("cpg_id", "entrezgene_id")]
+
+# Display the final matrix
+head(beta_matrix_valid_with_genes)
+```
+```{r}
+custom_mapping <- setNames(mapped_genes$cpg_id, mapped_genes$external_gene_name)
+
+head(custom_mapping)
+```
+
+```{r}
+#remove the cpg_id col from beta_matrix_valid_df
+beta_matrix_valid_df <- beta_matrix_valid_df[, !colnames(beta_matrix_valid_df) %in% "cpg_id"]
+
+head(beta_matrix_valid_df)
+```
+
+```{r}
+# Convert the cleaned data frame to a list grouped by entrezgene_id
+mapped_genes_list <- split(mapped_genes_clean$cpg_id, mapped_genes_clean$entrezgene_id)
+
+# Remove any entries with no associated gene (clean the list after creation)
+mapped_genes_list <- mapped_genes_list[lengths(mapped_genes_list) > 0]
+# Print the result
+print(mapped_genes_list)
+```
+
+```{r}
 library(parallel)
 library(ebGSEA)
 library(globaltest)
 
+print(pheno.v_binary)
+head(as.matrix(beta_matrix_valid_df))
+head(mapped_genes_list)
+```
+
+```{r}
 tryCatch({
   sgt.m <- doGT_custom(
     pheno.v = pheno.v_binary,
-    data.m = beta_matrix_valid,
+    data.m = as.matrix(beta_matrix_valid_df),
     model = c("linear"),
     array = "custom",
     ncores = 1,
-    custom_map = custom_mapping_valid
+    custom_map = mapped_genes_list
   )
   
   cat("Global Test completed successfully\n")
@@ -356,20 +420,134 @@ tryCatch({
 ```
 
 ```{r}
-# Run pathway enrichment analysis
-topGSEA.lm <- doGSEAwt(
-  rankEID.m = sgt.m,
-  ptw.ls = ptw.ls,
-  ncores = 4,
-  minN = 5,
-  adjPVth = 0.05
-)
+# Retrieve hallmark gene sets for mouse with Ensembl IDs
+msigdb.mm.ez <- getMsigdb(org = 'mm', id = 'EZID', version = '7.4')
 
-# Display top results
-head(topGSEA.lm[[1]])
+# Flatten the list structure to obtain a single list 
+ptw.ls_ez <- unlist(msigdb.mm.ez, recursive = FALSE)
 ```
 
 ```{r}
+# Check the first few row names
+head(rownames(sgt.m))
+
+# Find the intersection of genes between sgt.m and ptw.ls_ez
+common_genes <- intersect(rownames(sgt.m), ptw.ls_ez)
+```
+
+```{r}
+message("Structure of all_genes_ptw:")
+str(all_genes_ptw)
+
+# Iterate over the elements and check their class
+for (i in seq_along(all_genes_ptw)) {
+  message("Element ", i, " class: ", class(all_genes_ptw[[i]]))
+}
+
+common_genes <- as.character(unlist(common_genes))
+all_genes_ptw <- lapply(all_genes_ptw, function(genes) {
+  if (inherits(genes, "S4")) {
+    as.character(genes@.Data)  # Extract the actual data from the S4 object
+  } else if (is.vector(genes)) {
+    as.character(genes)  # Ensure it's a character vector
+  } else {
+    stop("Unsupported data type in all_genes_ptw.")
+  }
+})
+
+# Step 2: Filter sgt.m to include only common genes
+sgt.m_filtered <- sgt.m[unlist(common_genes), , drop = FALSE]
+
+# Step 3: Filter ptw.ls_ez to include only pathways with common genes
+ptw.ls_filtered <- lapply(all_genes_ptw, function(genes) {
+  intersect(genes, common_genes)
+})
+
+# Remove pathways that are now empty
+ptw.ls_filtered <- ptw.ls_filtered[sapply(ptw.ls_filtered, length) > 0]
+
+# Check dimensions and pathway counts after filtering
+message("Filtered sgt.m dimensions: ", dim(sgt.m_filtered))
+message("Number of pathways after filtering: ", length(ptw.ls_filtered))
+```
+
+
+```{r}
+install.packages("kpmt")
+```
+
+```{r}
+library(org.Mm.eg.db)
+
+# Generate random ENTREZIDs
+valid_entrez_ids <- keys(org.Mm.eg.db, keytype = "ENTREZID")
+sim_entrez_ids <- sample(valid_entrez_ids, 500)
+
+# Create simulated rank matrix with ENTREZIDs as rownames
+sim_rankEID.m <- matrix(
+    runif(500 * 2, min = 0, max = 1), 
+    nrow = 500, 
+    dimnames = list(sim_entrez_ids, c("Score1", "Score2"))
+)
+
+# Create simulated pathways with valid ENTREZIDs
+sim_ptw.ls <- list(
+    Pathway1 = sample(sim_entrez_ids, 100),
+    Pathway2 = sample(sim_entrez_ids, 100)
+)
+
+sim_results <- doGSEAwt_custom(
+    rankEID.m = sim_rankEID.m,
+    ptw.ls = sim_ptw.ls,
+    ncores = 1,
+    minN = 1,
+    adjPVth = 0.5 #had to increase adjustment way too high here to 0.5. but seems like function is working....
+)
+```
+
+```{r}
+library(kpmt)
+library(org.Mm.eg.db)
+ptw.ls_ez_subset <- ptw.ls_ez[1:500]  # First 50 pathways
+rankEID.m_subset <- sgt.m[1:450, ]  # First 100 rows of genes
+ptw.ls_ez_subset <- lapply(ptw.ls_ez_subset, function(x) x[x %in% rownames(rankEID.m_subset)])
+ptw.ls_ez_subset <- ptw.ls_ez_subset[sapply(ptw.ls_ez_subset, length) >= 3]
+
+topGSEA.lm <- doGSEAwt_custom(
+    rankEID.m = rankEID.m_subset,
+    ptw.ls = ptw.ls_ez_subset,
+    ncores = 1,
+    minN = 3,
+    adjPVth = 0.05
+)
+```
+
+
+```{r}
+library(kpmt)
+library(org.Mm.eg.db)
+
+# Run the analysis
+topGSEA.lm <- doGSEAwt_custom(
+  rankEID.m = as.matrix(sgt.m),
+  ptw.ls = ptw.ls_ez,
+  ncores = 1,
+  minN = 10,
+  adjPVth = 0.05
+)
+```
+
+```{r}
+library(ggplot2)
+# Plot the AUC and adjusted p-values
+ggplot(sim_results[[1]], aes(x = AUC, y = -log10(adjP))) +
+  geom_point() +
+  labs(x = "Area Under Curve", y = "-log10(Adjusted p-value)", title = "Pathway Enrichment Analysis") +
+  theme_minimal()
+```
+
+```{r}
+library(ggplot2)
 # Plot the AUC and adjusted p-values
 ggplot(topGSEA.lm[[1]], aes(x = AUC, y = -log10(adjP))) +
   geom_point() +

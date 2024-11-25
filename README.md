@@ -1,5 +1,5 @@
 # wgbsGSEA
--------
+
 ## Evaluating Gene Set Enrichment Analysis Methods (methylGSA & ebGSEA) for Whole Genome Bisulfite Sequencing Data
 
 ## Maya Arvanitis, McGill University  

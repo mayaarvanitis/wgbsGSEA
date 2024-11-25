@@ -23,7 +23,6 @@ map_cpgs_to_genes <- function(cpg_data, ensembl_mart) {
     mutate(chromosomal_region = paste0(chr, ":", start, "-", end)) %>%
     mutate(cpg_id = paste0(chr, "_", start, "_", end))  # Create cpg_id for mapping
   
-  
   # Retrieve annotations
   annotations <- getBM(
     attributes = c("chromosome_name", "start_position", "end_position", "external_gene_name"),
@@ -93,16 +92,15 @@ hypo_inputs <- prepare_methylGSA_inputs(hypo_annotations)
 
 # Step 6: Retrieve gene sets
 msigdb.mm <- getMsigdb(org = 'mm', id = 'SYM', version = '7.4')
-hallmarks <- subsetCollection(msigdb.mm, 'h')
 
-# Convert hallmarks to a list for methylGSA
-hallmarks_list <- lapply(hallmarks, function(gs) {
+# Convert the entire gene set collection to a list for methylGSA
+all_gene_sets_list <- lapply(msigdb.mm, function(gs) {
   setNames(list(gs@geneIds), gs@setName)
 })
-hallmarks_list <- unlist(hallmarks_list, recursive = FALSE)
+all_gene_sets_list <- unlist(all_gene_sets_list, recursive = FALSE)
 
 # Step 7: Run methylGSA (methylglm, ORA, GSEA) for hyper and hypo CpGs
-run_methylGSA <- function(inputs, hallmarks_list) {
+run_methylGSA <- function(inputs, all_gene_sets_list) {
   results <- list()
   
   # methylglm
@@ -111,7 +109,7 @@ run_methylGSA <- function(inputs, hallmarks_list) {
     array.type = "custom",
     FullAnnot = inputs$FullAnnot,
     group = "all",
-    GS.list = hallmarks_list,
+    GS.list = all_gene_sets_list,
     GS.idtype = "SYM",
     minsize = 2,
     maxsize = 800,
@@ -123,7 +121,7 @@ run_methylGSA <- function(inputs, hallmarks_list) {
     cpg.pval = inputs$cpg_pval,
     method = "ORA",
     FullAnnot = inputs$FullAnnot,
-    GS.list = hallmarks_list,
+    GS.list = all_gene_sets_list,
     GS.idtype = "SYM",
     minsize = 2,
     maxsize = 800
@@ -134,7 +132,7 @@ run_methylGSA <- function(inputs, hallmarks_list) {
     cpg.pval = inputs$cpg_pval,
     method = "GSEA",
     FullAnnot = inputs$FullAnnot,
-    GS.list = hallmarks_list,
+    GS.list = all_gene_sets_list,
     GS.idtype = "SYM",
     minsize = 2,
     maxsize = 800
@@ -144,10 +142,10 @@ run_methylGSA <- function(inputs, hallmarks_list) {
 }
 
 # Run methylGSA for hypermethylated CpGs
-hyper_results <- run_methylGSA(hyper_inputs, hallmarks_list)
+hyper_results <- run_methylGSA(hyper_inputs, all_gene_sets_list)
 
 # Run methylGSA for hypomethylated CpGs
-hypo_results <- run_methylGSA(hypo_inputs, hallmarks_list)
+hypo_results <- run_methylGSA(hypo_inputs, all_gene_sets_list)
 
 # Step 8: Save results
 saveRDS(hyper_results, "hyper_results.rds")

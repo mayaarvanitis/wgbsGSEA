@@ -401,18 +401,9 @@ results <- doGSEAwt_custom(
 [4]. **AnnotationDbi R Package**  
    Available at: [Bioconductor AnnotationDbi Documentation](https://bioconductor.org/packages/release/bioc/html/AnnotationDbi.html)  
 
-[5]. **Wilcoxon Rank Sum Test**  
-   Mann, H.B., Whitney, D.R.  
-   *On a Test of Whether one of Two Random Variables is Stochastically Larger than the Other*.  
-   Annals of Mathematical Statistics, Vol. 18, No. 1, pp. 50-60, 1947.
+[5]. **Wilcoxon Rank Sum Test** Mann, H.B., Whitney, D.R. *On a Test of Whether one of Two Random Variables is Stochastically Larger than the Other*. Annals of Mathematical Statistics, Vol. 18, No. 1, pp. 50-60, 1947.
 
-[6]. **Known-Population Median Test (KPMT)**  
-   Implemented using the **kpmt R package**. Documentation available at:  
-   [kpmt GitHub Repository](https://github.com/your-link-to-repo)
+[6]. **Known-Population Median Test (KPMT)** Implemented using the **kpmt R package**. Documentation available at: [kpmt GitHub Repository](https://github.com/your-link-to-repo)
 
-[7]. **Molecular Signatures Database (MSigDB)**  
-   Subramanian, A., Tamayo, P., et al.  
-   *Gene set enrichment analysis: A knowledge-based approach for interpreting genome-wide expression profiles*.  
-   **Proceedings of the National Academy of Sciences** (2005), 102(43):15545-15550.  
-   DOI: [10.1073/pnas.0506580102](https://doi.org/10.1073/pnas.0506580102)
+[7]. **Molecular Signatures Database (MSigDB)** Subramanian, A., Tamayo, P., et al. *Gene set enrichment analysis: A knowledge-based approach for interpreting genome-wide expression profiles*. **Proceedings of the National Academy of Sciences** (2005), 102(43):15545-15550. DOI: [10.1073/pnas.0506580102](https://doi.org/10.1073/pnas.0506580102)
 

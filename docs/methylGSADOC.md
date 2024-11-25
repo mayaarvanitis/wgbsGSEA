@@ -1,12 +1,6 @@
-Below is a structured documentation for your pipeline that describes the process of performing gene set analysis using methylGSA, starting from differential methylation data.
-
----
-
-# Pipeline Documentation: Gene Set Analysis with methylGSA
+# Gene Set Analysis with methylGSA
 
 ## Overview
-
-This pipeline performs gene set analysis (GSA) on differential methylation data to identify enriched pathways using the `methylGSA` package. It incorporates multiple steps from filtering CpGs to mapping them to genes, preparing annotations, and running various GSA methods.
 
 ### Key Steps
 1. **Load and Preprocess Differential Methylation Data**
@@ -131,7 +125,3 @@ res_GSEA <- methylRRA(
 ## Notes
 - Ensure all CpG IDs and gene symbols are properly formatted to avoid errors in annotation and analysis.
 - Parallel processing can be enabled for large datasets by setting `parallel = TRUE` in methylGSA methods.
-
----
-
-This documentation can be saved as `README.md` or embedded in an R Markdown file to accompany the pipeline code.

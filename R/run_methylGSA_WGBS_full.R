@@ -6,6 +6,7 @@ library(msigdb)
 library(org.Mm.eg.db)
 library(dplyr)
 library(readr)
+library(biomaRt)
 
 # Step 1: Load the differential methylation data
 diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
@@ -19,7 +20,9 @@ hypo_cpgs <- significant_cpgs %>% filter(meth.diff < 0)
 # Helper function for gene annotation
 map_cpgs_to_genes <- function(cpg_data, ensembl_mart) {
   cpg_data <- cpg_data %>%
-    mutate(chromosomal_region = paste0(chr, ":", start, "-", end))
+    mutate(chromosomal_region = paste0(chr, ":", start, "-", end)) %>%
+    mutate(cpg_id = paste0(chr, "_", start, "_", end))  # Create cpg_id for mapping
+  
   
   # Retrieve annotations
   annotations <- getBM(
@@ -38,7 +41,7 @@ map_cpgs_to_genes <- function(cpg_data, ensembl_mart) {
   cpg_gr <- GRanges(
     seqnames = cpg_data$chr,
     ranges = IRanges(start = cpg_data$start, end = cpg_data$end),
-    cpg_id = paste0(cpg_data$chr, "_", cpg_data$start, "_", cpg_data$end)
+    cpg_id = cpg_data$cpg_id
   )
   
   gene_gr <- GRanges(
@@ -53,14 +56,16 @@ map_cpgs_to_genes <- function(cpg_data, ensembl_mart) {
     external_gene_name = mcols(gene_gr)$external_gene_name[subjectHits(overlaps)]
   )
   
+  # Merge pvalues from the original cpg_data
   mapped_genes <- mapped_genes %>%
+    left_join(cpg_data %>% dplyr::select(cpg_id, pvalue), by = "cpg_id") %>%  # Retain pvalues
     distinct(cpg_id, .keep_all = TRUE)  # Remove duplicates
   
   return(mapped_genes)
 }
 
 # Step 4: Prepare annotation data
-ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://asia.ensembl.org")
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "https://useast.ensembl.org")
 
 # Annotate hypermethylated CpGs
 hyper_annotations <- map_cpgs_to_genes(hyper_cpgs, ensembl)
@@ -68,6 +73,7 @@ hypo_annotations <- map_cpgs_to_genes(hypo_cpgs, ensembl)
 
 # Step 5: Prepare methylGSA inputs
 prepare_methylGSA_inputs <- function(mapped_genes) {
+  
   # Generate CpG to gene mapping
   CpG2Gene <- mapped_genes %>%
     dplyr::select(cpg_id, external_gene_name) %>%

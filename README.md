@@ -56,7 +56,7 @@ To evaluate and implement GSEA methods for WGBS data, this project will follow t
 ---
 ### Getting Started
 
-# MethylGSA
+# :star: MethylGSA
 ---
 # Gene Set Analysis with methylGSA
 
@@ -186,7 +186,7 @@ res_GSEA <- methylRRA(
 - Ensure all CpG IDs and gene symbols are properly formatted to avoid errors in annotation and analysis.
 - Parallel processing can be enabled for large datasets by setting `parallel = TRUE` in methylGSA methods.
 
-# ebGSEA
+# :star: ebGSEA
 ---
 ## doGT_custom.R
 

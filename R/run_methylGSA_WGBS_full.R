@@ -1,3 +1,36 @@
+# Set CRAN mirror
+options(repos = c(CRAN = "https://cran.r-project.org"))
+
+# Define a function to install missing packages
+install_if_missing <- function(packages) {
+  for (pkg in packages) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      if (pkg %in% c("GenomicRanges", "AnnotationDbi", "methylGSA", "biomaRt", "msigdb")) {
+        # Install Bioconductor packages
+        if (!requireNamespace("BiocManager", quietly = TRUE)) {
+          install.packages("BiocManager")
+        }
+        BiocManager::install(pkg, ask = FALSE)
+      } else {
+        # Install CRAN packages
+        install.packages(pkg, repos = "http://cran.us.r-project.org")
+      }
+    }
+  }
+}
+
+# List of required packages
+required_packages <- c(
+  "GenomicRanges", "AnnotationDbi", "methylGSA", "biomaRt", 
+  "dplyr", "readr", "msigdb", "ggplot2"
+)
+
+# Install any missing packages
+install_if_missing(required_packages)
+
+# Load the required packages
+lapply(required_packages, library, character.only = TRUE)
+
 # Load required libraries
 library(GenomicRanges)
 library(AnnotationDbi)
@@ -9,7 +42,7 @@ library(readr)
 library(biomaRt)
 
 # Step 1: Load the differential methylation data
-diff_data <- readr::read_tsv("data_maya/WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
+diff_data <- readr::read_tsv("WTvsG34R_CRX_10W.diff_meth.tsv.gz", col_names = TRUE)
 
 # Step 2: Filter significant CpGs
 significant_cpgs <- diff_data %>% filter(pvalue < 0.05)

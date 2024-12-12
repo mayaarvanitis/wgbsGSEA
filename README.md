@@ -4,7 +4,7 @@
 
 Maya Arvanitis, McGill University | Supervisor: Dr. Claudia Kleinman
 
-<a href="wgbsGSEA.pdf" class="image fit"><img src="images/marr_pic.jpg" alt=""></a>
+[Read the project report](wgbsGSEA.pdf)
 
 ### Overview
 This project explores the application of gene set enrichment analysis (GSEA) methods to whole genome bisulfite sequencing (WGBS) data. WGBS provides single-base resolution on DNA methylation patterns across the genome, an invaluable tool for studying epigenetic changes and their impact on gene regulation. However, GSEA methodologies are traditionally developed for RNA-seq data, creating a gap in available tools for epigenomic data. This project aims to assess and adapt GSEA methods like methylGSA and ebGSEA to work effectively with WGBS data, with the potential of establishing a new pipeline for analyzing DNA methylation patterns and their biological implications.
